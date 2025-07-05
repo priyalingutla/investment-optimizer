@@ -9,7 +9,7 @@ Find the optimal investment frequency by backtesting across different market con
 - Professional visualization and clear recommendations
 
 ## Live Demo
-[Your app URL will go here]
+(https://optimal-investing-strategy.streamlit.app/)
 
 ## Usage
 1. Enter your stock ticker (VTI, SPY, AAPL, etc.)
