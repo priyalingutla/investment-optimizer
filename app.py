@@ -375,7 +375,7 @@ st.markdown("""
     margin-bottom: 2rem;
     padding: 1rem;
 ">
-📈 Optimal Investment Frequency Finder - FIXED
+📈 Optimal Investment Frequency Finder
 </div>
 """, unsafe_allow_html=True)
 
