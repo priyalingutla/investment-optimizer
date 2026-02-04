@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:docs.streamlit.io)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
