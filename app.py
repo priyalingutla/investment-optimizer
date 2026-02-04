@@ -6,7 +6,46 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
 import warnings
+import re
 warnings.filterwarnings('ignore')
+
+# =============================================================================
+# CONFIGURATION - All adjustable parameters in one place
+# =============================================================================
+CONFIG = {
+    # Cache settings
+    'cache_ttl_seconds': 3600,  # 1 hour cache for market data
+
+    # Trading calendar assumptions
+    'trading_days_per_month': 21,
+    'weeks_per_month': 4.33,
+
+    # QA validation thresholds
+    'monthly_coverage_threshold': 0.85,  # Require 85% of expected monthly investments
+    'weekly_coverage_threshold': 0.85,   # Require 85% of expected weekly investments
+    'min_data_points': 1000,             # Minimum trading days for analysis
+    'min_window_data_points': 500,       # Minimum points for rolling window
+
+    # Rolling window analysis
+    'min_start_buffer_days': 365,        # Minimum days before first window starts
+    'step_size_divisor': 30,             # Divide data length by this for step size
+    'min_step_size': 126,                # ~6 months minimum step
+
+    # Market regime analysis
+    'rolling_return_period': 252,        # 1 year for return calculation
+    'rolling_vol_period': 63,            # ~3 months for volatility
+    'min_regime_periods': 200,           # Minimum data points for regime analysis
+
+    # UI defaults
+    'default_ticker': 'VTI',
+    'default_monthly_amount': 1000,
+    'min_investment': 100,
+    'max_investment': 50000,
+
+    # Confidence thresholds
+    'high_confidence_threshold': 60,     # % win rate for high confidence
+    'moderate_confidence_threshold': 40, # % win rate for moderate confidence
+}
 
 # Set page config with light theme
 st.set_page_config(
@@ -64,44 +103,110 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+class StockDataResult:
+    """Structured result from stock data download for consistent handling."""
+    def __init__(self, data=None, error=None, stock_name=None, data_years=0):
+        self.data = data
+        self.error = error
+        self.stock_name = stock_name
+        self.data_years = data_years
+        self.success = data is not None and error is None
+
+def validate_ticker(symbol):
+    """Validate ticker symbol format before API call."""
+    if not symbol or not isinstance(symbol, str):
+        return False, "Ticker symbol is required"
+
+    # Remove whitespace and validate format
+    symbol = symbol.strip().upper()
+
+    # Basic format validation (alphanumeric, dots, hyphens allowed)
+    if not re.match(r'^[A-Z0-9\.\-]{1,10}$', symbol):
+        return False, f"Invalid ticker format: '{symbol}'. Use 1-10 alphanumeric characters."
+
+    return True, symbol
+
+@st.cache_data(ttl=CONFIG['cache_ttl_seconds'])
 def download_stock_data(symbol, max_years=None):
-    """Download and prepare stock data from the earliest available date"""
+    """
+    Download and prepare stock data from Yahoo Finance.
+
+    Returns:
+        StockDataResult with data, error, stock_name, and data_years
+    """
+    # Validate ticker format first
+    is_valid, validation_result = validate_ticker(symbol)
+    if not is_valid:
+        return StockDataResult(error=validation_result, stock_name=symbol)
+
+    symbol = validation_result  # Use cleaned symbol
+
     try:
         ticker = yf.Ticker(symbol)
-        
-        # Get the maximum available history
+
+        # Get historical data
         if max_years:
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=max_years*365)
+            start_date = end_date - timedelta(days=max_years * 365)
             data = ticker.history(start=start_date, end=end_date, actions=True, period="max")
         else:
-            # Get ALL available data
             data = ticker.history(actions=True, period="max")
-        
-        if len(data) == 0:
-            return None, f"No data found for {symbol}"
-        
+
+        if data is None or len(data) == 0:
+            return StockDataResult(
+                error=f"No data found for '{symbol}'. Please verify the ticker symbol is correct.",
+                stock_name=symbol
+            )
+
         # Clean and prepare data
         data = data.dropna()
+
+        if len(data) == 0:
+            return StockDataResult(
+                error=f"Data for '{symbol}' contains only invalid entries.",
+                stock_name=symbol
+            )
+
+        # Normalize timezone
         if data.index.tz is not None:
             data.index = data.index.tz_localize(None)
-        
+
         data['Weekday'] = data.index.day_name()
-        
-        # Get basic info about the stock
+
+        # Get stock name (with fallback)
+        stock_name = symbol
         try:
             info = ticker.info
-            stock_name = info.get('longName', symbol)
-        except:
-            stock_name = symbol
-        
-        # Calculate how many years of data we have
+            if info and 'longName' in info:
+                stock_name = info.get('longName', symbol)
+        except Exception:
+            pass  # Keep symbol as name if info fetch fails
+
+        # Calculate data span
         data_years = (data.index.max() - data.index.min()).days / 365.25
-        
-        return data, None, stock_name, data_years
+
+        return StockDataResult(
+            data=data,
+            stock_name=stock_name,
+            data_years=data_years
+        )
+
+    except ConnectionError:
+        return StockDataResult(
+            error="Network error: Unable to connect to Yahoo Finance. Please check your internet connection.",
+            stock_name=symbol
+        )
     except Exception as e:
-        return None, f"Error downloading {symbol}: {str(e)}", symbol, 0
+        error_msg = str(e)
+        if "No timezone" in error_msg or "ticker" in error_msg.lower():
+            return StockDataResult(
+                error=f"Invalid ticker '{symbol}': Symbol not found or delisted.",
+                stock_name=symbol
+            )
+        return StockDataResult(
+            error=f"Error fetching data for '{symbol}': {error_msg}",
+            stock_name=symbol
+        )
 
 def perform_investment_qa(data, investment_dates, frequency, specific_day=None):
     """Quality assurance checks for investment schedules"""
@@ -112,37 +217,48 @@ def perform_investment_qa(data, investment_dates, frequency, specific_day=None):
         'passed': True
     }
     
-    # Check 1: No missing investments (very relaxed tolerance)
+    # Check 1: Investment coverage validation
     if frequency == 'monthly':
         data_months = (data.index.max() - data.index.min()).days / 30.44
         expected_months = int(data_months)
         actual_months = len(investment_dates)
-        
-        # Very relaxed - just make sure we're not missing most months
-        if actual_months < expected_months * 0.70:  # Allow 30% missing (very relaxed)
+        coverage_ratio = actual_months / expected_months if expected_months > 0 else 0
+
+        if coverage_ratio < CONFIG['monthly_coverage_threshold']:
             qa_results['warnings'].append(
-                f"Monthly strategy missing many investments: {actual_months} vs {expected_months} expected"
+                f"Monthly strategy coverage low: {actual_months}/{expected_months} months ({coverage_ratio:.0%})"
             )
         else:
             qa_results['info'].append(
-                f"✅ Monthly coverage: {actual_months}/{expected_months} months"
+                f"✅ Monthly coverage: {actual_months}/{expected_months} months ({coverage_ratio:.0%})"
             )
-    
+
     elif frequency == 'weekly':
         data_weeks = (data.index.max() - data.index.min()).days / 7
         expected_weeks = int(data_weeks)
         actual_weeks = len(investment_dates)
-        
+
         if specific_day:
-            min_expected = expected_weeks * 0.08  # Very relaxed for weekdays
-            if actual_weeks < min_expected:
+            # For specific weekday, expect ~1/5 of total weeks (accounting for holidays)
+            expected_specific_day = expected_weeks * 0.18  # ~18% accounts for holidays
+            coverage_ratio = actual_weeks / expected_specific_day if expected_specific_day > 0 else 0
+            if coverage_ratio < CONFIG['weekly_coverage_threshold']:
                 qa_results['warnings'].append(
-                    f"Weekly {specific_day} strategy has few investments: {actual_weeks}"
+                    f"Weekly {specific_day} coverage low: {actual_weeks} investments ({coverage_ratio:.0%} of expected)"
+                )
+            else:
+                qa_results['info'].append(
+                    f"✅ Weekly {specific_day} coverage: {actual_weeks} investments ({coverage_ratio:.0%})"
                 )
         else:
-            if actual_weeks < expected_weeks * 0.70:  # Very relaxed
+            coverage_ratio = actual_weeks / expected_weeks if expected_weeks > 0 else 0
+            if coverage_ratio < CONFIG['weekly_coverage_threshold']:
                 qa_results['warnings'].append(
-                    f"Weekly strategy missing investments: {actual_weeks} vs {expected_weeks} expected"
+                    f"Weekly strategy coverage low: {actual_weeks}/{expected_weeks} weeks ({coverage_ratio:.0%})"
+                )
+            else:
+                qa_results['info'].append(
+                    f"✅ Weekly coverage: {actual_weeks}/{expected_weeks} weeks ({coverage_ratio:.0%})"
                 )
     
     # Check 2: Investment dates exist in trading data (informational only)
@@ -176,10 +292,10 @@ def calculate_strategy_performance(data, frequency='daily', specific_day=None, m
     if len(data) == 0:
         return None
     
-    # FIXED: Get investment dates and amounts with proper monthly calculation
+    # Get investment dates and amounts based on frequency
     if frequency == 'daily':
         investment_dates = data.index
-        investment_amount = monthly_budget / 21  # ~21 trading days per month
+        investment_amount = monthly_budget / CONFIG['trading_days_per_month']
     elif frequency == 'weekly':
         if specific_day:
             weekday_data = data[data['Weekday'] == specific_day]
@@ -187,7 +303,7 @@ def calculate_strategy_performance(data, frequency='daily', specific_day=None, m
         else:
             weekly_groups = data.groupby(data.index.to_period('W'))
             investment_dates = weekly_groups.first().index
-        investment_amount = monthly_budget / 4.33  # ~4.33 weeks per month
+        investment_amount = monthly_budget / CONFIG['weeks_per_month']
     elif frequency == 'monthly':
         # FIXED: Use a more robust monthly date generation method
         # Group by year-month and take the first trading day of each month
@@ -256,10 +372,11 @@ def calculate_strategy_performance(data, frequency='daily', specific_day=None, m
     }
 
 def rolling_window_analysis(data, strategies, monthly_budget, window_years=None):
-    """Test strategies across rolling time windows"""
-    
+    """Test strategies across rolling time windows for robustness analysis."""
+
     total_years = (data.index.max() - data.index.min()).days / 365.25
-    
+
+    # Determine appropriate window sizes based on available data
     if window_years is None:
         if total_years >= 20:
             window_years = [3, 5, 7, 10]
@@ -269,29 +386,29 @@ def rolling_window_analysis(data, strategies, monthly_budget, window_years=None)
             window_years = [3, 5]
         else:
             window_years = [3]
-    
+
     rolling_results = []
-    
+
     for window in window_years:
         if window > total_years - 1:
             continue
-            
+
         window_days = window * 365
         max_start = len(data) - window_days
-        
-        if max_start < 365:
+
+        if max_start < CONFIG['min_start_buffer_days']:
             continue
-        
-        step_size = max(126, len(data) // 30)
+
+        step_size = max(CONFIG['min_step_size'], len(data) // CONFIG['step_size_divisor'])
         start_points = range(0, max_start, step_size)
-        
+
         for start_idx in start_points:
             end_idx = start_idx + window_days
             window_data = data.iloc[start_idx:end_idx]
-            
-            if len(window_data) < 500:
+
+            if len(window_data) < CONFIG['min_window_data_points']:
                 continue
-            
+
             window_results = []
             for strategy_name, (freq, day) in strategies.items():
                 result = calculate_strategy_performance(window_data, freq, day, monthly_budget)
@@ -300,50 +417,58 @@ def rolling_window_analysis(data, strategies, monthly_budget, window_years=None)
                     result['start_date'] = window_data.index.min()
                     result['end_date'] = window_data.index.max()
                     window_results.append(result)
-            
+
             if window_results:
                 best = max(window_results, key=lambda x: x['annualized_return'])
                 for result in window_results:
                     result['is_winner'] = (result['strategy'] == best['strategy'])
-                
+
                 rolling_results.extend(window_results)
-    
+
     return rolling_results
 
 def regime_analysis(data, strategies, monthly_budget):
-    """Analyze performance across different market conditions"""
-    
+    """Analyze performance across different market conditions (volatility & returns)."""
+
     data_copy = data.copy()
-    data_copy['Rolling_Return_252'] = data_copy['Close'].pct_change(252) * 100
-    data_copy['Rolling_Vol_63'] = data_copy['Close'].pct_change().rolling(63).std() * np.sqrt(252) * 100
-    
-    data_copy = data_copy.fillna(method='ffill').fillna(method='bfill')
-    
-    vol_75th = data_copy['Rolling_Vol_63'].quantile(0.75)
-    vol_25th = data_copy['Rolling_Vol_63'].quantile(0.25)
-    ret_75th = data_copy['Rolling_Return_252'].quantile(0.75)
-    ret_25th = data_copy['Rolling_Return_252'].quantile(0.25)
-    
+
+    # Calculate rolling metrics using configurable periods
+    return_period = CONFIG['rolling_return_period']
+    vol_period = CONFIG['rolling_vol_period']
+
+    data_copy['Rolling_Return'] = data_copy['Close'].pct_change(return_period) * 100
+    data_copy['Rolling_Vol'] = data_copy['Close'].pct_change().rolling(vol_period).std() * np.sqrt(252) * 100
+
+    data_copy = data_copy.ffill().bfill()
+
+    # Calculate quantile thresholds
+    vol_75th = data_copy['Rolling_Vol'].quantile(0.75)
+    vol_25th = data_copy['Rolling_Vol'].quantile(0.25)
+    ret_75th = data_copy['Rolling_Return'].quantile(0.75)
+    ret_25th = data_copy['Rolling_Return'].quantile(0.25)
+
+    # Define market conditions
     market_conditions = {
-        'High Volatility': data_copy['Rolling_Vol_63'] > vol_75th,
-        'Low Volatility': data_copy['Rolling_Vol_63'] < vol_25th,
-        'Bear Periods': data_copy['Rolling_Return_252'] < ret_25th,
-        'Bull Periods': data_copy['Rolling_Return_252'] > ret_75th,
-        'Crisis Periods': (data_copy['Rolling_Vol_63'] > vol_75th) & (data_copy['Rolling_Return_252'] < ret_25th),
-        'Goldilocks': (data_copy['Rolling_Vol_63'] < vol_25th) & (data_copy['Rolling_Return_252'] > ret_75th)
+        'High Volatility': data_copy['Rolling_Vol'] > vol_75th,
+        'Low Volatility': data_copy['Rolling_Vol'] < vol_25th,
+        'Bear Periods': data_copy['Rolling_Return'] < ret_25th,
+        'Bull Periods': data_copy['Rolling_Return'] > ret_75th,
+        'Crisis Periods': (data_copy['Rolling_Vol'] > vol_75th) & (data_copy['Rolling_Return'] < ret_25th),
+        'Goldilocks': (data_copy['Rolling_Vol'] < vol_25th) & (data_copy['Rolling_Return'] > ret_75th)
     }
-    
+
     regime_results = []
-    
+    min_periods = CONFIG['min_regime_periods']
+
     for condition_name, condition_mask in market_conditions.items():
-        if condition_mask.sum() < 200:
+        if condition_mask.sum() < min_periods:
             continue
-        
+
         condition_data = data_copy[condition_mask]
-        
-        if len(condition_data) < 200:
+
+        if len(condition_data) < min_periods:
             continue
-        
+
         condition_strategy_results = []
         for strategy_name, (freq, day) in strategies.items():
             result = calculate_strategy_performance(condition_data, freq, day, monthly_budget)
@@ -351,14 +476,14 @@ def regime_analysis(data, strategies, monthly_budget):
                 result['regime'] = condition_name
                 result['regime_periods'] = len(condition_data)
                 condition_strategy_results.append(result)
-        
+
         if condition_strategy_results:
             best = max(condition_strategy_results, key=lambda x: x['annualized_return'])
             for result in condition_strategy_results:
                 result['is_winner'] = (result['strategy'] == best['strategy'])
-            
+
             regime_results.extend(condition_strategy_results)
-    
+
     return regime_results
 
 # Main App Header
@@ -381,8 +506,7 @@ st.markdown("""
 
 st.markdown("""
 <div style='text-align: center; margin-bottom: 2rem; color: #666;'>
-    Find the best investment timing strategy by backtesting across different market conditions and time periods<br>
-    <strong>🔧 FIXED: Monthly calculation issue resolved - now correctly invests full monthly amount!</strong>
+    Find the best investment timing strategy by backtesting across different market conditions and time periods
 </div>
 """, unsafe_allow_html=True)
 
@@ -391,17 +515,17 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     ticker = st.text_input(
-        "📊 Stock Ticker", 
-        value="VTI", 
+        "📊 Stock Ticker",
+        value=CONFIG['default_ticker'],
         help="Enter any stock ticker (VTI, SPY, QQQ, AAPL, etc.)"
     ).upper()
 
 with col2:
     monthly_amount = st.number_input(
         "💰 Monthly Investment ($)",
-        min_value=100,
-        max_value=50000,
-        value=1000,
+        min_value=CONFIG['min_investment'],
+        max_value=CONFIG['max_investment'],
+        value=CONFIG['default_monthly_amount'],
         step=100,
         help="How much you want to invest each month"
     )
@@ -426,27 +550,26 @@ with col3:
 
 # Run Analysis Button
 if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=True):
-    
+
     # Download data
-    with st.spinner(f"📡 Downloading maximum available data for {ticker}..."):
+    with st.spinner(f"📡 Downloading data for {ticker}..."):
         if use_max_data:
             result = download_stock_data(ticker)
         else:
             result = download_stock_data(ticker, analysis_years)
-            
-        if len(result) == 4:
-            data, error, stock_name, data_years = result
-        else:
-            data, error = result[:2]
-            stock_name = ticker
-            data_years = 0
-    
-    if error:
+
+        # Extract results from StockDataResult object
+        data = result.data
+        error = result.error
+        stock_name = result.stock_name
+        data_years = result.data_years
+
+    if not result.success:
         st.error(f"❌ {error}")
         st.stop()
-    
-    if len(data) < 1000:
-        st.error("❌ Insufficient data for robust analysis. Try a different ticker or longer time period.")
+
+    if len(data) < CONFIG['min_data_points']:
+        st.error(f"❌ Insufficient data for robust analysis. Found {len(data):,} trading days, need at least {CONFIG['min_data_points']:,}. Try a different ticker or longer time period.")
         st.stop()
     
     st.success(f"✅ Loaded {len(data):,} trading days for {stock_name} ({data_years:.1f} years of data)")
@@ -702,14 +825,14 @@ if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=T
             total_periods_tested = len(rolling_df) // len(strategies)
             best_strategy_wins = rolling_df[rolling_df['strategy'] == best_overall['strategy']]['is_winner'].sum()
             confidence_level = best_strategy_wins / total_periods_tested * 100
-            
-            if confidence_level >= 60:
+
+            if confidence_level >= CONFIG['high_confidence_threshold']:
                 confidence = "HIGH CONFIDENCE ✅"
-            elif confidence_level >= 40:
+            elif confidence_level >= CONFIG['moderate_confidence_threshold']:
                 confidence = "MODERATE CONFIDENCE ⚖️"
             else:
                 confidence = "LOW CONFIDENCE ⚠️"
-            
+
             insights.append(f"**🎯 Recommendation**: {confidence} - Deploy {best_overall['strategy'].replace('_', ' ').title()} strategy")
         
         for insight in insights:
@@ -717,13 +840,16 @@ if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=T
         
         # Simple action item
         st.markdown("---")
+        daily_amount = monthly_amount / CONFIG['trading_days_per_month']
+        weekly_amount = monthly_amount / CONFIG['weeks_per_month']
+
         st.markdown(f"""
         ### 🚀 **Action Plan**
         **Start investing ${monthly_amount:,}/month using the {best_overall['strategy'].replace('_', ' ').title()} strategy:**
-        
-        {f"• **Daily**: Invest ${monthly_amount/21:.0f} every trading day" if best_overall['strategy'] == 'daily' else ""}
+
+        {f"• **Daily**: Invest ${daily_amount:.0f} every trading day" if best_overall['strategy'] == 'daily' else ""}
         {f"• **Monthly**: Invest ${monthly_amount:,} on the first trading day of each month" if best_overall['strategy'] == 'monthly' else ""}
-        {f"• **Weekly**: Invest ${monthly_amount/4.33:.0f} every {best_overall['strategy'].split('_')[1]}" if 'weekly' in best_overall['strategy'] else ""}
+        {f"• **Weekly**: Invest ${weekly_amount:.0f} every {best_overall['strategy'].split('_')[1]}" if 'weekly' in best_overall['strategy'] else ""}
         
         This strategy has been tested across **{total_periods_tested if 'total_periods_tested' in locals() else 'multiple'}** different market periods for maximum robustness.
         """)
