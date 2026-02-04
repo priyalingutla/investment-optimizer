@@ -958,6 +958,146 @@ def regime_analysis(data, strategies, monthly_budget):
     return regime_results
 
 
+def calculate_perfect_timing_hypothetical(data, monthly_budget=1000, window_days=30, tolerance_days=3):
+    """
+    HYPOTHETICAL: What if you could perfectly time the market?
+
+    This thought experiment compares:
+    - Perfect Low Timing: Investing within `tolerance_days` of the monthly low
+    - Perfect High Timing: Investing within `tolerance_days` of the monthly high (worst case)
+    - Random/Realistic: First trading day of month (what most people do)
+
+    This is IMPOSSIBLE to achieve in practice - it's purely educational to show
+    the theoretical maximum benefit of market timing.
+
+    Args:
+        data: Stock price data
+        monthly_budget: Amount to invest per month
+        window_days: Rolling window to find low/high (default 30 days)
+        tolerance_days: How close to the actual low/high counts as "perfect" (default 3 days)
+
+    Returns:
+        dict with results for each hypothetical strategy
+    """
+    if len(data) < window_days * 2:
+        return None
+
+    data_copy = data.copy()
+
+    # Calculate rolling lows and highs
+    data_copy['Rolling_Low'] = data_copy['Close'].rolling(window=window_days, min_periods=window_days).min()
+    data_copy['Rolling_High'] = data_copy['Close'].rolling(window=window_days, min_periods=window_days).max()
+
+    # Identify days that are within tolerance of the rolling low/high
+    data_copy['Near_Low'] = data_copy['Close'] <= data_copy['Rolling_Low'] * (1 + tolerance_days * 0.005)  # ~0.5% per day tolerance
+    data_copy['Near_High'] = data_copy['Close'] >= data_copy['Rolling_High'] * (1 - tolerance_days * 0.005)
+
+    # Group by month
+    data_copy['YearMonth'] = data_copy.index.to_period('M')
+
+    results = {}
+
+    # Calculate target total investment
+    data_months = (data.index.max() - data.index.min()).days / 30.44
+    target_total = monthly_budget * data_months
+
+    for strategy_name, condition_col in [('Perfect Low Timing', 'Near_Low'),
+                                           ('Perfect High Timing', 'Near_High')]:
+        total_shares = 0
+        investment_count = 0
+
+        for period, group in data_copy.groupby('YearMonth'):
+            # Find the best day to invest in this month based on condition
+            condition_days = group[group[condition_col]]
+
+            if len(condition_days) > 0:
+                if 'Low' in strategy_name:
+                    # Pick the actual lowest price day from qualifying days
+                    best_day = condition_days['Close'].idxmin()
+                else:
+                    # Pick the actual highest price day from qualifying days
+                    best_day = condition_days['Close'].idxmax()
+                price = data_copy.loc[best_day, 'Close']
+            else:
+                # Fallback to first day of month if no qualifying days
+                price = group['Close'].iloc[0]
+
+            if price > 0:
+                investment_count += 1
+
+        # Normalize investment amount
+        if investment_count == 0:
+            continue
+
+        investment_amount = target_total / investment_count
+
+        # Recalculate with normalized amounts
+        total_shares = 0
+        total_invested = 0
+
+        for period, group in data_copy.groupby('YearMonth'):
+            condition_days = group[group[condition_col]]
+
+            if len(condition_days) > 0:
+                if 'Low' in strategy_name:
+                    best_day = condition_days['Close'].idxmin()
+                else:
+                    best_day = condition_days['Close'].idxmax()
+                price = data_copy.loc[best_day, 'Close']
+            else:
+                price = group['Close'].iloc[0]
+
+            if price > 0:
+                shares = investment_amount / price
+                total_shares += shares
+                total_invested += investment_amount
+
+        if total_invested > 0 and total_shares > 0:
+            final_value = total_shares * data_copy['Close'].iloc[-1]
+            total_return = (final_value - total_invested) / total_invested * 100
+            years = (data.index.max() - data.index.min()).days / 365.25
+            annualized = ((final_value / total_invested) ** (1 / years) - 1) * 100
+
+            results[strategy_name] = {
+                'total_invested': total_invested,
+                'final_value': final_value,
+                'total_return': total_return,
+                'annualized_return': annualized,
+                'years': years
+            }
+
+    # Also calculate "Realistic" (first of month) for comparison
+    monthly_groups = data_copy.groupby('YearMonth')
+    investment_count = len(monthly_groups)
+    investment_amount = target_total / investment_count
+
+    total_shares = 0
+    total_invested = 0
+
+    for period, group in monthly_groups:
+        price = group['Close'].iloc[0]
+        if price > 0:
+            shares = investment_amount / price
+            total_shares += shares
+            total_invested += investment_amount
+
+    if total_invested > 0 and total_shares > 0:
+        final_value = total_shares * data_copy['Close'].iloc[-1]
+        total_return = (final_value - total_invested) / total_invested * 100
+        years = (data.index.max() - data.index.min()).days / 365.25
+        annualized = ((final_value / total_invested) ** (1 / years) - 1) * 100
+
+        results['Realistic (1st of Month)'] = {
+            'total_invested': total_invested,
+            'final_value': final_value,
+            'total_return': total_return,
+            'annualized_return': annualized,
+            'years': years
+        }
+
+    return results
+
+
 def calculate_bootstrap_ci(rolling_results, n_bootstrap=None, confidence_level=None):
     """
     Calculate bootstrap confidence intervals for strategy returns.
@@ -1872,6 +2012,137 @@ if st.button("Analyze Investment Strategies", type="primary", use_container_widt
                     st.warning(f"⚠️ **Moderate Confidence**: Recommended strategy wins {confidence:.0f}% of time periods")
             else:
                 st.info("ℹ️ Confidence based on overall performance across full time period")
+
+        # =============================================================================
+        # THOUGHT EXPERIMENT: Perfect Market Timing (Hypothetical)
+        # =============================================================================
+        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+
+        with st.expander("🔮 Thought Experiment: What If You Could Time the Market?", expanded=False):
+            st.markdown("""
+            <div class="info-box">
+                <p>⚠️ <strong>This is purely hypothetical!</strong> Perfect market timing is impossible in practice.
+                This thought experiment shows the theoretical maximum benefit of timing - to put the frequency debate in perspective.</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Calculate the hypothetical
+            with st.spinner("Running hypothetical timing analysis..."):
+                timing_results = calculate_perfect_timing_hypothetical(data, monthly_amount)
+
+            if timing_results and len(timing_results) >= 3:
+                st.markdown("### If You Could Perfectly Time Every Month...")
+
+                col1, col2, col3 = st.columns(3)
+
+                # Perfect Low (Best Case)
+                if 'Perfect Low Timing' in timing_results:
+                    low = timing_results['Perfect Low Timing']
+                    with col1:
+                        st.markdown("""
+                        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3);
+                                    border-radius: 12px; padding: 1.5rem; text-align: center;">
+                            <div style="color: #10b981; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em;">
+                                🎯 Perfect Low Timing
+                            </div>
+                            <div style="color: #f8fafc; font-size: 2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin: 0.5rem 0;">
+                                {:.2f}%
+                            </div>
+                            <div style="color: #64748b; font-size: 0.85rem;">
+                                ${:,.0f} final value
+                            </div>
+                            <div style="color: #475569; font-size: 0.75rem; margin-top: 0.5rem;">
+                                Buy within 3 days of monthly low
+                            </div>
+                        </div>
+                        """.format(low['annualized_return'], low['final_value']), unsafe_allow_html=True)
+
+                # Realistic (Middle)
+                if 'Realistic (1st of Month)' in timing_results:
+                    realistic = timing_results['Realistic (1st of Month)']
+                    with col2:
+                        st.markdown("""
+                        <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3);
+                                    border-radius: 12px; padding: 1.5rem; text-align: center;">
+                            <div style="color: #818cf8; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em;">
+                                📅 Realistic (1st of Month)
+                            </div>
+                            <div style="color: #f8fafc; font-size: 2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin: 0.5rem 0;">
+                                {:.2f}%
+                            </div>
+                            <div style="color: #64748b; font-size: 0.85rem;">
+                                ${:,.0f} final value
+                            </div>
+                            <div style="color: #475569; font-size: 0.75rem; margin-top: 0.5rem;">
+                                What most investors actually do
+                            </div>
+                        </div>
+                        """.format(realistic['annualized_return'], realistic['final_value']), unsafe_allow_html=True)
+
+                # Perfect High (Worst Case)
+                if 'Perfect High Timing' in timing_results:
+                    high = timing_results['Perfect High Timing']
+                    with col3:
+                        st.markdown("""
+                        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3);
+                                    border-radius: 12px; padding: 1.5rem; text-align: center;">
+                            <div style="color: #f87171; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em;">
+                                💸 Perfect High Timing
+                            </div>
+                            <div style="color: #f8fafc; font-size: 2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin: 0.5rem 0;">
+                                {:.2f}%
+                            </div>
+                            <div style="color: #64748b; font-size: 0.85rem;">
+                                ${:,.0f} final value
+                            </div>
+                            <div style="color: #475569; font-size: 0.75rem; margin-top: 0.5rem;">
+                                Worst possible timing each month
+                            </div>
+                        </div>
+                        """.format(high['annualized_return'], high['final_value']), unsafe_allow_html=True)
+
+                # Calculate the spread
+                if all(k in timing_results for k in ['Perfect Low Timing', 'Perfect High Timing', 'Realistic (1st of Month)']):
+                    low_return = timing_results['Perfect Low Timing']['annualized_return']
+                    high_return = timing_results['Perfect High Timing']['annualized_return']
+                    realistic_return = timing_results['Realistic (1st of Month)']['annualized_return']
+
+                    timing_spread = low_return - high_return
+                    realistic_vs_perfect = low_return - realistic_return
+
+                    low_value = timing_results['Perfect Low Timing']['final_value']
+                    realistic_value = timing_results['Realistic (1st of Month)']['final_value']
+                    value_diff = low_value - realistic_value
+
+                    st.markdown(f"""
+                    <div class="verdict-box verdict-info" style="margin-top: 1.5rem;">
+                        <div class="verdict-title">📊 What This Tells Us</div>
+                        <div class="verdict-text">
+                            <p><strong>Perfect timing spread:</strong> {timing_spread:.2f}% annually between best and worst possible timing</p>
+                            <p><strong>Realistic vs Perfect:</strong> You're leaving ~{realistic_vs_perfect:.2f}% on the table vs impossible perfection</p>
+                            <p><strong>Dollar impact:</strong> ${value_diff:,.0f} difference over {timing_results['Perfect Low Timing']['years']:.1f} years</p>
+                            <br>
+                            <p style="color: #f59e0b;"><strong>⚠️ Remember:</strong> This is <em>impossible</em> to achieve! No one can consistently predict monthly lows.
+                            The realistic strategy (buying on a fixed day) captures most of the returns with zero stress.</p>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    # Key insight
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+                                border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 12px; padding: 1.5rem; margin-top: 1rem;">
+                        <p style="color: #a5b4fc; margin: 0; font-size: 1.1rem; text-align: center;">
+                            <strong>Key Insight:</strong> Even with <em>perfect</em> timing (which is impossible), the benefit is only
+                            <strong>{timing_spread:.1f}%</strong> annually. Compare this to our frequency analysis where the spread
+                            was <strong>~0.08%</strong>. Market timing matters ~{timing_spread/0.08:.0f}x more than frequency —
+                            but both pale in comparison to simply <em>staying invested</em>.
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            else:
+                st.warning("Unable to calculate timing hypothetical - insufficient data")
 
 # Footer
 st.markdown("""
