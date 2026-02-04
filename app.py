@@ -958,94 +958,65 @@ def regime_analysis(data, strategies, monthly_budget):
     return regime_results
 
 
-def calculate_perfect_timing_hypothetical(data, monthly_budget=1000, window_days=30, tolerance_days=3):
+def calculate_perfect_timing_hypothetical(data, monthly_budget=1000):
     """
     HYPOTHETICAL: What if you could perfectly time the market?
 
     This thought experiment compares:
-    - Perfect Low Timing: Investing within `tolerance_days` of the monthly low
-    - Perfect High Timing: Investing within `tolerance_days` of the monthly high (worst case)
-    - Random/Realistic: First trading day of month (what most people do)
+    - Perfect Low Timing: Invest on the day with the LOWEST price each calendar month
+    - Perfect High Timing: Invest on the day with the HIGHEST price each calendar month (worst case)
+    - Realistic: First trading day of each month (what most people do)
 
-    This is IMPOSSIBLE to achieve in practice - it's purely educational to show
-    the theoretical maximum benefit of market timing.
-
-    Args:
-        data: Stock price data
-        monthly_budget: Amount to invest per month
-        window_days: Rolling window to find low/high (default 30 days)
-        tolerance_days: How close to the actual low/high counts as "perfect" (default 3 days)
+    All strategies invest ONCE per calendar month (same as our other monthly calculations).
+    This is IMPOSSIBLE to achieve in practice - purely educational.
 
     Returns:
         dict with results for each hypothetical strategy
     """
-    if len(data) < window_days * 2:
+    if len(data) < 60:  # Need at least ~2 months of data
         return None
 
     data_copy = data.copy()
-
-    # Calculate rolling lows and highs
-    data_copy['Rolling_Low'] = data_copy['Close'].rolling(window=window_days, min_periods=window_days).min()
-    data_copy['Rolling_High'] = data_copy['Close'].rolling(window=window_days, min_periods=window_days).max()
-
-    # Identify days that are within tolerance of the rolling low/high
-    data_copy['Near_Low'] = data_copy['Close'] <= data_copy['Rolling_Low'] * (1 + tolerance_days * 0.005)  # ~0.5% per day tolerance
-    data_copy['Near_High'] = data_copy['Close'] >= data_copy['Rolling_High'] * (1 - tolerance_days * 0.005)
-
-    # Group by month
     data_copy['YearMonth'] = data_copy.index.to_period('M')
 
-    results = {}
-
-    # Calculate target total investment
+    # Calculate target total investment (same normalization as other strategies)
     data_months = (data.index.max() - data.index.min()).days / 30.44
     target_total = monthly_budget * data_months
 
-    for strategy_name, condition_col in [('Perfect Low Timing', 'Near_Low'),
-                                           ('Perfect High Timing', 'Near_High')]:
-        total_shares = 0
-        investment_count = 0
+    results = {}
 
-        for period, group in data_copy.groupby('YearMonth'):
-            # Find the best day to invest in this month based on condition
-            condition_days = group[group[condition_col]]
+    # Define the three strategies
+    strategies = {
+        'Perfect Low Timing': 'low',      # Buy at monthly LOW
+        'Perfect High Timing': 'high',    # Buy at monthly HIGH (worst case)
+        'Realistic (1st of Month)': 'first'  # Buy on 1st trading day
+    }
 
-            if len(condition_days) > 0:
-                if 'Low' in strategy_name:
-                    # Pick the actual lowest price day from qualifying days
-                    best_day = condition_days['Close'].idxmin()
-                else:
-                    # Pick the actual highest price day from qualifying days
-                    best_day = condition_days['Close'].idxmax()
-                price = data_copy.loc[best_day, 'Close']
-            else:
-                # Fallback to first day of month if no qualifying days
-                price = group['Close'].iloc[0]
+    for strategy_name, timing_type in strategies.items():
+        # Count investments (one per month)
+        monthly_groups = data_copy.groupby('YearMonth')
+        investment_count = len(monthly_groups)
 
-            if price > 0:
-                investment_count += 1
-
-        # Normalize investment amount
         if investment_count == 0:
             continue
 
+        # Normalize investment amount so total invested matches other strategies
         investment_amount = target_total / investment_count
 
-        # Recalculate with normalized amounts
+        # Calculate returns
         total_shares = 0
         total_invested = 0
 
-        for period, group in data_copy.groupby('YearMonth'):
-            condition_days = group[group[condition_col]]
+        for period, group in monthly_groups:
+            # Determine which day to invest based on strategy
+            if timing_type == 'low':
+                invest_day_idx = group['Close'].idxmin()  # Day with lowest price
+            elif timing_type == 'high':
+                invest_day_idx = group['Close'].idxmax()  # Day with highest price
+            else:  # 'first'
+                invest_day_idx = group.index[0]  # First trading day
 
-            if len(condition_days) > 0:
-                if 'Low' in strategy_name:
-                    best_day = condition_days['Close'].idxmin()
-                else:
-                    best_day = condition_days['Close'].idxmax()
-                price = data_copy.loc[best_day, 'Close']
-            else:
-                price = group['Close'].iloc[0]
+            price = group.loc[invest_day_idx, 'Close']
 
             if price > 0:
                 shares = investment_amount / price
@@ -1063,37 +1034,9 @@ def calculate_perfect_timing_hypothetical(data, monthly_budget=1000, window_days
                 'final_value': final_value,
                 'total_return': total_return,
                 'annualized_return': annualized,
-                'years': years
+                'years': years,
+                'investments': investment_count
             }
-
-    # Also calculate "Realistic" (first of month) for comparison
-    monthly_groups = data_copy.groupby('YearMonth')
-    investment_count = len(monthly_groups)
-    investment_amount = target_total / investment_count
-
-    total_shares = 0
-    total_invested = 0
-
-    for period, group in monthly_groups:
-        price = group['Close'].iloc[0]
-        if price > 0:
-            shares = investment_amount / price
-            total_shares += shares
-            total_invested += investment_amount
-
-    if total_invested > 0 and total_shares > 0:
-        final_value = total_shares * data_copy['Close'].iloc[-1]
-        total_return = (final_value - total_invested) / total_invested * 100
-        years = (data.index.max() - data.index.min()).days / 365.25
-        annualized = ((final_value / total_invested) ** (1 / years) - 1) * 100
-
-        results['Realistic (1st of Month)'] = {
-            'total_invested': total_invested,
-            'final_value': final_value,
-            'total_return': total_return,
-            'annualized_return': annualized,
-            'years': years
-        }
 
     return results
 
