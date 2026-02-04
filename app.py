@@ -45,6 +45,13 @@ CONFIG = {
     # Confidence thresholds
     'high_confidence_threshold': 60,     # % win rate for high confidence
     'moderate_confidence_threshold': 40, # % win rate for moderate confidence
+
+    # Statistical significance settings
+    'bootstrap_iterations': 1000,        # Number of bootstrap resamples
+    'confidence_level': 0.95,            # 95% confidence intervals
+    'effect_size_small': 0.2,            # Cohen's d threshold for small effect
+    'effect_size_medium': 0.5,           # Cohen's d threshold for medium effect
+    'effect_size_large': 0.8,            # Cohen's d threshold for large effect
 }
 
 # Set page config with light theme
@@ -486,6 +493,174 @@ def regime_analysis(data, strategies, monthly_budget):
 
     return regime_results
 
+
+def calculate_bootstrap_ci(rolling_results, n_bootstrap=None, confidence_level=None):
+    """
+    Calculate bootstrap confidence intervals for strategy returns.
+
+    Uses the rolling window results to bootstrap confidence intervals,
+    answering: "How confident are we in each strategy's mean return?"
+
+    Returns:
+        dict: {strategy_name: {'mean': x, 'ci_lower': y, 'ci_upper': z, 'std': s}}
+    """
+    if n_bootstrap is None:
+        n_bootstrap = CONFIG['bootstrap_iterations']
+    if confidence_level is None:
+        confidence_level = CONFIG['confidence_level']
+
+    # Convert to DataFrame and group by strategy
+    rolling_df = pd.DataFrame(rolling_results)
+    strategies = rolling_df['strategy'].unique()
+
+    bootstrap_results = {}
+
+    for strategy in strategies:
+        strategy_returns = rolling_df[rolling_df['strategy'] == strategy]['annualized_return'].values
+
+        if len(strategy_returns) < 5:
+            continue
+
+        # Bootstrap resampling
+        bootstrap_means = []
+        np.random.seed(42)  # Reproducibility
+
+        for _ in range(n_bootstrap):
+            # Resample with replacement
+            sample = np.random.choice(strategy_returns, size=len(strategy_returns), replace=True)
+            bootstrap_means.append(np.mean(sample))
+
+        bootstrap_means = np.array(bootstrap_means)
+
+        # Calculate confidence interval
+        alpha = 1 - confidence_level
+        ci_lower = np.percentile(bootstrap_means, alpha / 2 * 100)
+        ci_upper = np.percentile(bootstrap_means, (1 - alpha / 2) * 100)
+
+        bootstrap_results[strategy] = {
+            'mean': np.mean(strategy_returns),
+            'std': np.std(strategy_returns),
+            'ci_lower': ci_lower,
+            'ci_upper': ci_upper,
+            'n_samples': len(strategy_returns)
+        }
+
+    return bootstrap_results
+
+
+def calculate_cohens_d(group1, group2):
+    """
+    Calculate Cohen's d effect size between two groups.
+
+    Cohen's d = (mean1 - mean2) / pooled_std
+
+    Interpretation:
+        |d| < 0.2: negligible
+        |d| 0.2-0.5: small
+        |d| 0.5-0.8: medium
+        |d| > 0.8: large
+    """
+    n1, n2 = len(group1), len(group2)
+    var1, var2 = np.var(group1, ddof=1), np.var(group2, ddof=1)
+
+    # Pooled standard deviation
+    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+
+    if pooled_std == 0:
+        return 0
+
+    return (np.mean(group1) - np.mean(group2)) / pooled_std
+
+
+def interpret_effect_size(d):
+    """Interpret Cohen's d effect size."""
+    d_abs = abs(d)
+    if d_abs < CONFIG['effect_size_small']:
+        return 'negligible'
+    elif d_abs < CONFIG['effect_size_medium']:
+        return 'small'
+    elif d_abs < CONFIG['effect_size_large']:
+        return 'medium'
+    else:
+        return 'large'
+
+
+def statistical_significance_analysis(rolling_results):
+    """
+    Comprehensive statistical significance analysis.
+
+    Determines if differences between strategies are statistically meaningful
+    or just noise.
+
+    Returns:
+        dict with bootstrap CIs, pairwise comparisons, and overall verdict
+    """
+    rolling_df = pd.DataFrame(rolling_results)
+    strategies = rolling_df['strategy'].unique()
+
+    # 1. Bootstrap confidence intervals for each strategy
+    bootstrap_cis = calculate_bootstrap_ci(rolling_results)
+
+    # 2. Find the best strategy by mean return
+    best_strategy = max(bootstrap_cis.keys(), key=lambda s: bootstrap_cis[s]['mean'])
+    best_mean = bootstrap_cis[best_strategy]['mean']
+    best_ci = (bootstrap_cis[best_strategy]['ci_lower'], bootstrap_cis[best_strategy]['ci_upper'])
+
+    # 3. Pairwise comparisons with best strategy
+    pairwise_results = {}
+    significant_differences = []
+
+    for strategy in strategies:
+        if strategy == best_strategy:
+            continue
+
+        strategy_returns = rolling_df[rolling_df['strategy'] == strategy]['annualized_return'].values
+        best_returns = rolling_df[rolling_df['strategy'] == best_strategy]['annualized_return'].values
+
+        # Check CI overlap (non-overlapping = significant)
+        other_ci = (bootstrap_cis[strategy]['ci_lower'], bootstrap_cis[strategy]['ci_upper'])
+        ci_overlap = not (best_ci[0] > other_ci[1] or other_ci[0] > best_ci[1])
+
+        # Calculate effect size
+        cohens_d = calculate_cohens_d(best_returns, strategy_returns)
+        effect_interpretation = interpret_effect_size(cohens_d)
+
+        # Determine significance
+        is_significant = not ci_overlap and effect_interpretation in ['medium', 'large']
+
+        pairwise_results[strategy] = {
+            'mean_diff': best_mean - bootstrap_cis[strategy]['mean'],
+            'ci_overlap': ci_overlap,
+            'cohens_d': cohens_d,
+            'effect_size': effect_interpretation,
+            'is_significant': is_significant
+        }
+
+        if is_significant:
+            significant_differences.append(strategy)
+
+    # 4. Overall verdict
+    if len(significant_differences) == 0:
+        verdict = 'no_significant_difference'
+        verdict_text = "Differences between strategies are NOT statistically significant. Investment frequency doesn't meaningfully impact returns for this ticker."
+    elif len(significant_differences) == len(strategies) - 1:
+        verdict = 'clear_winner'
+        verdict_text = f"{best_strategy.replace('_', ' ').title()} significantly outperforms ALL other strategies."
+    else:
+        verdict = 'partial_significance'
+        sig_names = [s.replace('_', ' ').title() for s in significant_differences]
+        verdict_text = f"{best_strategy.replace('_', ' ').title()} significantly outperforms: {', '.join(sig_names)}. Other strategies perform similarly."
+
+    return {
+        'bootstrap_cis': bootstrap_cis,
+        'best_strategy': best_strategy,
+        'pairwise': pairwise_results,
+        'significant_differences': significant_differences,
+        'verdict': verdict,
+        'verdict_text': verdict_text
+    }
+
+
 # Main App Header
 st.markdown("""
 <div style="
@@ -547,6 +722,83 @@ with col3:
         )
     else:
         st.write("**Using maximum available data**")
+
+# Methodology Section (Educational)
+with st.expander("📚 How This Analysis Works", expanded=False):
+    st.markdown("""
+    ### Understanding the Methodology
+
+    This tool helps you determine if **when** you invest (daily, weekly, or monthly) actually
+    matters for your returns. Here's what we do:
+
+    ---
+
+    #### 1️⃣ **Dollar-Cost Averaging (DCA) Simulation**
+
+    We simulate investing your monthly budget using different frequencies:
+    - **Daily**: Split your monthly amount across ~21 trading days
+    - **Weekly**: Split across ~4.33 weeks (we test each day of the week separately)
+    - **Monthly**: Invest the full amount on the first trading day of each month
+
+    Each strategy invests the **same total amount** over time - only the timing differs.
+
+    ---
+
+    #### 2️⃣ **Rolling Window Analysis**
+
+    Instead of just looking at one time period, we test each strategy across **many different
+    market periods** (3-year, 5-year, 7-year, and 10-year windows). This shows how strategies
+    perform in different market conditions:
+    - Bull markets 📈
+    - Bear markets 📉
+    - High volatility periods
+    - Calm markets
+
+    ---
+
+    #### 3️⃣ **Statistical Significance Testing**
+
+    Just because one strategy has a higher average return doesn't mean it's actually better.
+    The difference could be random noise. We use two statistical methods:
+
+    **Bootstrap Confidence Intervals**
+    - We resample our results 1,000 times to estimate the true range of each strategy's returns
+    - If the confidence intervals overlap, the strategies are statistically similar
+    - Think of it as: "If we ran this experiment 1,000 times, what range of results would we see?"
+
+    **Cohen's d Effect Size**
+    - Even if there's a statistical difference, is it *practically* meaningful?
+    - Effect sizes: Negligible (<0.2) → Small (0.2-0.5) → Medium (0.5-0.8) → Large (>0.8)
+    - A "small" effect might be statistically significant but not worth changing your behavior
+
+    ---
+
+    #### 4️⃣ **The Verdict**
+
+    We combine statistical significance with effect size to give you a clear answer:
+
+    | Result | What It Means |
+    |--------|---------------|
+    | **No Significant Difference** | Pick whichever frequency is most convenient for you |
+    | **Clear Winner** | One strategy is reliably better - use it |
+    | **Partial Significance** | Some differences exist, but the best choice depends on your preferences |
+
+    ---
+
+    #### 📖 Key Concepts
+
+    **Annualized Return**: Your yearly growth rate, accounting for compounding.
+    *Example: 8% annualized means $1,000 becomes $1,080 after one year*
+
+    **Max Drawdown**: The largest peak-to-trough decline in your portfolio.
+    *Example: 20% drawdown means at some point you were down 20% from your highest value*
+
+    **Confidence Interval**: A range where the true value likely falls.
+    *Example: 8.2% [7.4% - 9.1%] means we're 95% confident the true return is in that range*
+
+    **Statistical Significance**: The probability that an observed difference is real, not random chance.
+    *We use p < 0.05, meaning less than 5% chance the difference is due to luck*
+    """)
 
 # Run Analysis Button
 if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=True):
@@ -713,7 +965,80 @@ if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=T
                 worst_performance = avg_performance.loc[avg_performance['mean'].idxmin()]
                 performance_spread = best_performance['mean'] - worst_performance['mean']
                 st.write(f"• **Performance spread**: {performance_spread:.2f}% difference between best and worst")
-        
+
+            # Statistical Significance Analysis
+            st.subheader("📊 Statistical Significance Analysis")
+            st.markdown("*Does investment frequency actually matter for this ticker, or is it just noise?*")
+
+            sig_analysis = statistical_significance_analysis(rolling_results)
+
+            # Display bootstrap confidence intervals
+            st.markdown("**95% Confidence Intervals by Strategy:**")
+
+            # Create a DataFrame for display
+            ci_data = []
+            for strategy, stats in sig_analysis['bootstrap_cis'].items():
+                ci_data.append({
+                    'Strategy': strategy.replace('_', ' ').title(),
+                    'Mean Return': f"{stats['mean']:.2f}%",
+                    '95% CI': f"[{stats['ci_lower']:.2f}% - {stats['ci_upper']:.2f}%]",
+                    'Std Dev': f"{stats['std']:.2f}%",
+                    'Samples': stats['n_samples']
+                })
+
+            ci_df = pd.DataFrame(ci_data)
+            ci_df = ci_df.sort_values('Mean Return', ascending=False, key=lambda x: x.str.rstrip('%').astype(float))
+            st.dataframe(ci_df, use_container_width=True, hide_index=True)
+
+            # Pairwise comparisons with best strategy
+            best_strat_name = sig_analysis['best_strategy'].replace('_', ' ').title()
+            st.markdown(f"**Comparing other strategies to {best_strat_name}:**")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                for strategy, comparison in sig_analysis['pairwise'].items():
+                    strategy_name = strategy.replace('_', ' ').title()
+                    diff = comparison['mean_diff']
+                    effect = comparison['effect_size']
+                    overlap = "overlap" if comparison['ci_overlap'] else "no overlap"
+
+                    if comparison['is_significant']:
+                        st.markdown(f"• **{strategy_name}**: {diff:+.2f}% diff, **{effect}** effect ⚠️")
+                    else:
+                        st.markdown(f"• **{strategy_name}**: {diff:+.2f}% diff, {effect} effect")
+
+            with col2:
+                # Effect size legend
+                st.markdown("**Effect Size Guide:**")
+                st.markdown("• *Negligible* (<0.2): No practical difference")
+                st.markdown("• *Small* (0.2-0.5): Minor difference")
+                st.markdown("• *Medium* (0.5-0.8): Meaningful difference")
+                st.markdown("• *Large* (>0.8): Major difference")
+
+            # Verdict box
+            if sig_analysis['verdict'] == 'no_significant_difference':
+                verdict_color = "#e8f5e9"  # Light green
+                verdict_icon = "✅"
+            elif sig_analysis['verdict'] == 'clear_winner':
+                verdict_color = "#fff3e0"  # Light orange
+                verdict_icon = "🏆"
+            else:
+                verdict_color = "#e3f2fd"  # Light blue
+                verdict_icon = "📊"
+
+            st.markdown(f"""
+            <div style="
+                background: {verdict_color};
+                padding: 1rem;
+                border-radius: 10px;
+                margin: 1rem 0;
+                border-left: 4px solid {'#4caf50' if sig_analysis['verdict'] == 'no_significant_difference' else '#ff9800'};
+            ">
+                <strong>{verdict_icon} STATISTICAL VERDICT:</strong><br>
+                {sig_analysis['verdict_text']}
+            </div>
+            """, unsafe_allow_html=True)
+
         # Market condition results
         if regime_results:
             st.subheader("📊 Market Condition Analysis") 
@@ -796,63 +1121,95 @@ if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=T
         
         # Summary insights
         st.subheader("🎯 Key Insights & Recommendation")
-        
+
         insights = []
-        
+
         # Overall best strategy
         insights.append(f"**🏆 Best Overall Strategy**: {best_overall['strategy'].replace('_', ' ').title()} with {best_overall['annualized_return']:.2f}% annualized returns")
-        
+
         # Most consistent winner across all periods
         if rolling_results:
             rolling_df = pd.DataFrame(rolling_results)
             most_consistent = rolling_df.groupby('strategy')['is_winner'].sum().idxmax()
             most_consistent_rate = rolling_df.groupby('strategy')['is_winner'].mean().max() * 100
-            
+
             if most_consistent == best_overall['strategy']:
-                insights.append(f"**✅ High Confidence**: This strategy wins {most_consistent_rate:.0f}% of all time periods tested")
+                insights.append(f"**✅ Consistency**: This strategy wins {most_consistent_rate:.0f}% of all time periods tested")
             else:
                 insights.append(f"**⚖️ Alternative**: {most_consistent.replace('_', ' ').title()} is most consistent (wins {most_consistent_rate:.0f}% of periods)")
-        
+
         # Performance vs market conditions
         if regime_results:
             regime_df = pd.DataFrame(regime_results)
             best_strategy_regimes = regime_df[regime_df['strategy'] == best_overall['strategy']]
             avg_regime_return = best_strategy_regimes['annualized_return'].mean()
             insights.append(f"**📊 Market Adaptability**: Averages {avg_regime_return:.1f}% across all market conditions")
-        
-        # Final recommendation
+
+        # Statistical significance insight (sig_analysis was computed in rolling window section)
+        stat_verdict = sig_analysis['verdict'] if rolling_results else None
+
+        if stat_verdict == 'no_significant_difference':
+            insights.append("**📈 Statistical Finding**: Frequency differences are NOT significant - choose based on convenience")
+        elif stat_verdict == 'clear_winner':
+            insights.append(f"**📈 Statistical Finding**: {best_overall['strategy'].replace('_', ' ').title()} is statistically superior")
+        elif stat_verdict == 'partial_significance':
+            insights.append("**📈 Statistical Finding**: Some frequency differences are meaningful")
+
+        # Final recommendation incorporating statistical analysis
         if rolling_results:
             total_periods_tested = len(rolling_df) // len(strategies)
             best_strategy_wins = rolling_df[rolling_df['strategy'] == best_overall['strategy']]['is_winner'].sum()
             confidence_level = best_strategy_wins / total_periods_tested * 100
 
-            if confidence_level >= CONFIG['high_confidence_threshold']:
+            # Adjust confidence based on statistical significance
+            if stat_verdict == 'no_significant_difference':
+                # If no significant difference, recommend convenience
+                confidence = "FREQUENCY DOESN'T MATTER 🎯"
+                recommendation = "Pick whichever frequency fits your schedule best"
+            elif confidence_level >= CONFIG['high_confidence_threshold']:
                 confidence = "HIGH CONFIDENCE ✅"
+                recommendation = f"Deploy {best_overall['strategy'].replace('_', ' ').title()} strategy"
             elif confidence_level >= CONFIG['moderate_confidence_threshold']:
                 confidence = "MODERATE CONFIDENCE ⚖️"
+                recommendation = f"Deploy {best_overall['strategy'].replace('_', ' ').title()} strategy"
             else:
                 confidence = "LOW CONFIDENCE ⚠️"
+                recommendation = f"Consider {best_overall['strategy'].replace('_', ' ').title()}, but any frequency is acceptable"
 
-            insights.append(f"**🎯 Recommendation**: {confidence} - Deploy {best_overall['strategy'].replace('_', ' ').title()} strategy")
-        
+            insights.append(f"**🎯 Recommendation**: {confidence} - {recommendation}")
+
         for insight in insights:
             st.markdown(f"• {insight}")
-        
-        # Simple action item
+
+        # Action Plan
         st.markdown("---")
         daily_amount = monthly_amount / CONFIG['trading_days_per_month']
         weekly_amount = monthly_amount / CONFIG['weeks_per_month']
 
-        st.markdown(f"""
-        ### 🚀 **Action Plan**
-        **Start investing ${monthly_amount:,}/month using the {best_overall['strategy'].replace('_', ' ').title()} strategy:**
+        # Customize action plan based on statistical significance
+        if stat_verdict == 'no_significant_difference':
+            st.markdown(f"""
+            ### 🚀 **Action Plan**
+            **Investment frequency doesn't significantly impact returns for {stock_name}.**
 
-        {f"• **Daily**: Invest ${daily_amount:.0f} every trading day" if best_overall['strategy'] == 'daily' else ""}
-        {f"• **Monthly**: Invest ${monthly_amount:,} on the first trading day of each month" if best_overall['strategy'] == 'monthly' else ""}
-        {f"• **Weekly**: Invest ${weekly_amount:.0f} every {best_overall['strategy'].split('_')[1]}" if 'weekly' in best_overall['strategy'] else ""}
-        
-        This strategy has been tested across **{total_periods_tested if 'total_periods_tested' in locals() else 'multiple'}** different market periods for maximum robustness.
-        """)
+            Choose the option that best fits your lifestyle:
+            • **Daily**: Invest ${daily_amount:.0f}/day - Best for automated investing
+            • **Weekly**: Invest ${weekly_amount:.0f}/week - Good balance of simplicity and averaging
+            • **Monthly**: Invest ${monthly_amount:,}/month - Simplest to manage manually
+
+            All strategies performed statistically similarly across **{total_periods_tested}** market periods.
+            """)
+        else:
+            st.markdown(f"""
+            ### 🚀 **Action Plan**
+            **Start investing ${monthly_amount:,}/month using the {best_overall['strategy'].replace('_', ' ').title()} strategy:**
+
+            {f"• **Daily**: Invest ${daily_amount:.0f} every trading day" if best_overall['strategy'] == 'daily' else ""}
+            {f"• **Monthly**: Invest ${monthly_amount:,} on the first trading day of each month" if best_overall['strategy'] == 'monthly' else ""}
+            {f"• **Weekly**: Invest ${weekly_amount:.0f} every {best_overall['strategy'].split('_')[1]}" if 'weekly' in best_overall['strategy'] else ""}
+
+            This strategy has been tested across **{total_periods_tested if 'total_periods_tested' in locals() else 'multiple'}** different market periods.
+            """)
         
         # Consolidated QA Summary at the end - only show if no major issues
         with st.expander("🔍 Quality Assurance Summary", expanded=False):
