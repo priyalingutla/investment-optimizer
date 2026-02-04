@@ -61,58 +61,466 @@ CONFIG = {
     'retry_backoff_factor': 2,           # Multiply delay by this each retry
 }
 
-# Set page config with light theme
+# =============================================================================
+# PAGE CONFIG & PROFESSIONAL STYLING
+# =============================================================================
 st.set_page_config(
-    page_title="Optimal Investment Frequency Finder",
-    page_icon="📈",
+    page_title="Investment Frequency Optimizer",
+    page_icon="💹",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# Force bright theme and pastel styling
+# Professional dark theme with modern styling
 st.markdown("""
 <style>
-    /* Soft pastel button - light and gentle */
-    .stButton > button {
-        background: linear-gradient(45deg, #ffeaa7, #fab1a0) !important;
-        color: #2d3748 !important;
-        border: none !important;
-        border-radius: 20px !important;
-        padding: 0.75rem 2rem !important;
-        font-weight: 500 !important;
-        font-size: 1.1rem !important;
-        box-shadow: 0 4px 15px rgba(255, 234, 167, 0.4) !important;
-        transition: all 0.3s ease !important;
+    /* ===== IMPORTS ===== */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    /* ===== ROOT VARIABLES ===== */
+    :root {
+        --bg-primary: #0a0a0f;
+        --bg-secondary: #12121a;
+        --bg-card: #1a1a24;
+        --bg-card-hover: #22222e;
+        --accent-primary: #6366f1;
+        --accent-secondary: #8b5cf6;
+        --accent-success: #10b981;
+        --accent-warning: #f59e0b;
+        --accent-danger: #ef4444;
+        --text-primary: #f8fafc;
+        --text-secondary: #94a3b8;
+        --text-muted: #64748b;
+        --border-color: #2d2d3a;
+        --border-radius: 12px;
+        --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
+        --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.5);
+        --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        --gradient-success: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+        --gradient-card: linear-gradient(145deg, #1a1a24 0%, #12121a 100%);
     }
-    
-    .stButton > button:hover {
-        background: linear-gradient(45deg, #fdcb6e, #e17055) !important;
-        transform: translateY(-1px) !important;
-        box-shadow: 0 6px 20px rgba(255, 203, 110, 0.5) !important;
+
+    /* ===== BASE STYLES ===== */
+    .stApp {
+        background: var(--bg-primary) !important;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
     }
-    
-    /* Winner box styling */
-    .winner-box {
-        background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 50%, #fecfef 100%);
-        color: #2d3748;
-        padding: 2rem;
-        border-radius: 20px;
+
+    /* Hide default Streamlit elements */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* ===== TYPOGRAPHY ===== */
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'Inter', sans-serif !important;
+        font-weight: 600 !important;
+        color: var(--text-primary) !important;
+        letter-spacing: -0.02em !important;
+    }
+
+    p, span, label, .stMarkdown {
+        color: var(--text-secondary) !important;
+    }
+
+    /* ===== HERO SECTION ===== */
+    .hero-container {
         text-align: center;
-        margin: 1rem 0;
-        font-size: 1.3rem;
-        font-weight: 600;
-        box-shadow: 0 10px 30px rgba(255, 154, 158, 0.3);
-        border: 2px solid rgba(255, 255, 255, 0.3);
+        padding: 3rem 2rem;
+        margin-bottom: 2rem;
     }
-    
-    /* Input container styling */
-    .input-container {
-        background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(248,250,252,0.9) 100%);
+
+    .hero-badge {
+        display: inline-block;
+        background: rgba(99, 102, 241, 0.15);
+        color: #818cf8;
+        padding: 0.5rem 1rem;
+        border-radius: 50px;
+        font-size: 0.85rem;
+        font-weight: 500;
+        margin-bottom: 1.5rem;
+        border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+
+    .hero-title {
+        font-size: 3rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #f8fafc 0%, #94a3b8 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 1rem;
+        line-height: 1.2;
+    }
+
+    .hero-subtitle {
+        font-size: 1.15rem;
+        color: var(--text-muted);
+        max-width: 600px;
+        margin: 0 auto;
+        line-height: 1.6;
+    }
+
+    /* ===== CARD STYLES ===== */
+    .card {
+        background: var(--gradient-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--border-radius);
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        box-shadow: var(--shadow-sm);
+        transition: all 0.3s ease;
+    }
+
+    .card:hover {
+        border-color: rgba(99, 102, 241, 0.3);
+        box-shadow: var(--shadow-md);
+    }
+
+    .card-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .card-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+    }
+
+    .card-icon-purple { background: rgba(99, 102, 241, 0.15); }
+    .card-icon-green { background: rgba(16, 185, 129, 0.15); }
+    .card-icon-orange { background: rgba(245, 158, 11, 0.15); }
+    .card-icon-blue { background: rgba(59, 130, 246, 0.15); }
+
+    .card-title {
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: var(--text-muted) !important;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    /* ===== METRIC CARDS ===== */
+    .metric-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--border-radius);
+        padding: 1.5rem;
+        text-align: center;
+    }
+
+    .metric-value {
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-family: 'JetBrains Mono', monospace;
+    }
+
+    .metric-label {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        margin-top: 0.5rem;
+    }
+
+    .metric-delta {
+        font-size: 0.8rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        margin-top: 0.5rem;
+        display: inline-block;
+    }
+
+    .metric-delta-positive {
+        background: rgba(16, 185, 129, 0.15);
+        color: #34d399;
+    }
+
+    .metric-delta-negative {
+        background: rgba(239, 68, 68, 0.15);
+        color: #f87171;
+    }
+
+    /* ===== RESULT BANNER ===== */
+    .result-banner {
+        background: var(--gradient-primary);
+        border-radius: 16px;
         padding: 2rem;
-        border-radius: 20px;
+        text-align: center;
+        margin: 2rem 0;
+        box-shadow: 0 8px 32px rgba(99, 102, 241, 0.3);
+    }
+
+    .result-banner-success {
+        background: var(--gradient-success);
+        box-shadow: 0 8px 32px rgba(16, 185, 129, 0.3);
+    }
+
+    .result-title {
+        font-size: 1rem;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.8);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 0.5rem;
+    }
+
+    .result-value {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: white;
+    }
+
+    .result-subtitle {
+        font-size: 0.95rem;
+        color: rgba(255, 255, 255, 0.7);
+        margin-top: 0.75rem;
+    }
+
+    /* ===== VERDICT BOX ===== */
+    .verdict-box {
+        border-radius: 16px;
+        padding: 1.5rem 2rem;
+        margin: 1.5rem 0;
+        border-left: 4px solid;
+    }
+
+    .verdict-success {
+        background: rgba(16, 185, 129, 0.1);
+        border-left-color: var(--accent-success);
+    }
+
+    .verdict-warning {
+        background: rgba(245, 158, 11, 0.1);
+        border-left-color: var(--accent-warning);
+    }
+
+    .verdict-info {
+        background: rgba(99, 102, 241, 0.1);
+        border-left-color: var(--accent-primary);
+    }
+
+    .verdict-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--text-primary) !important;
+        margin-bottom: 0.5rem;
+    }
+
+    .verdict-text {
+        color: var(--text-secondary) !important;
+        line-height: 1.6;
+    }
+
+    /* ===== BUTTONS ===== */
+    .stButton > button {
+        background: var(--gradient-primary) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 10px !important;
+        padding: 0.875rem 2rem !important;
+        font-weight: 600 !important;
+        font-size: 1rem !important;
+        font-family: 'Inter', sans-serif !important;
+        letter-spacing: 0.02em !important;
+        box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4) !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        width: 100% !important;
+    }
+
+    .stButton > button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 25px rgba(99, 102, 241, 0.5) !important;
+    }
+
+    .stButton > button:active {
+        transform: translateY(0) !important;
+    }
+
+    /* ===== INPUTS ===== */
+    .stTextInput > div > div > input,
+    .stNumberInput > div > div > input {
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: 10px !important;
+        color: var(--text-primary) !important;
+        padding: 0.75rem 1rem !important;
+        font-family: 'Inter', sans-serif !important;
+        font-size: 1rem !important;
+        transition: all 0.2s ease !important;
+    }
+
+    .stTextInput > div > div > input:focus,
+    .stNumberInput > div > div > input:focus {
+        border-color: var(--accent-primary) !important;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15) !important;
+    }
+
+    .stTextInput label, .stNumberInput label, .stCheckbox label {
+        color: var(--text-secondary) !important;
+        font-weight: 500 !important;
+        font-size: 0.9rem !important;
+    }
+
+    /* ===== CHECKBOX ===== */
+    .stCheckbox > label > div[data-testid="stMarkdownContainer"] > p {
+        color: var(--text-secondary) !important;
+    }
+
+    /* ===== EXPANDER ===== */
+    .streamlit-expanderHeader {
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: var(--border-radius) !important;
+        color: var(--text-primary) !important;
+        font-weight: 500 !important;
+    }
+
+    .streamlit-expanderContent {
+        background: var(--bg-secondary) !important;
+        border: 1px solid var(--border-color) !important;
+        border-top: none !important;
+        border-radius: 0 0 var(--border-radius) var(--border-radius) !important;
+    }
+
+    /* ===== DATAFRAMES ===== */
+    .stDataFrame {
+        border-radius: var(--border-radius) !important;
+        overflow: hidden !important;
+    }
+
+    .stDataFrame [data-testid="stDataFrameResizable"] {
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: var(--border-radius) !important;
+    }
+
+    /* ===== TABS ===== */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background: var(--bg-secondary);
+        padding: 0.5rem;
+        border-radius: var(--border-radius);
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        background: transparent !important;
+        border-radius: 8px !important;
+        color: var(--text-muted) !important;
+        font-weight: 500 !important;
+        padding: 0.5rem 1rem !important;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background: var(--bg-card) !important;
+        color: var(--text-primary) !important;
+    }
+
+    /* ===== METRICS (Native Streamlit) ===== */
+    [data-testid="stMetricValue"] {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-weight: 600 !important;
+        color: var(--text-primary) !important;
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: var(--text-muted) !important;
+    }
+
+    [data-testid="stMetricDelta"] {
+        font-family: 'JetBrains Mono', monospace !important;
+    }
+
+    /* ===== SPINNER ===== */
+    .stSpinner > div {
+        border-top-color: var(--accent-primary) !important;
+    }
+
+    /* ===== PROGRESS ===== */
+    .stProgress > div > div > div {
+        background: var(--gradient-primary) !important;
+    }
+
+    /* ===== SECTION DIVIDER ===== */
+    .section-divider {
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--border-color), transparent);
+        margin: 2rem 0;
+    }
+
+    /* ===== STATS GRID ===== */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin: 1.5rem 0;
+    }
+
+    .stat-item {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--border-radius);
+        padding: 1.25rem;
+        text-align: center;
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-family: 'JetBrains Mono', monospace;
+    }
+
+    .stat-label {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-top: 0.25rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    /* ===== INFO BOX ===== */
+    .info-box {
+        background: rgba(99, 102, 241, 0.08);
+        border: 1px solid rgba(99, 102, 241, 0.2);
+        border-radius: var(--border-radius);
+        padding: 1rem 1.25rem;
         margin: 1rem 0;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-        border: 1px solid rgba(220, 230, 255, 0.3);
+    }
+
+    .info-box p {
+        color: #a5b4fc !important;
+        margin: 0;
+    }
+
+    /* ===== FOOTER ===== */
+    .app-footer {
+        text-align: center;
+        padding: 2rem;
+        margin-top: 3rem;
+        border-top: 1px solid var(--border-color);
+        color: var(--text-muted);
+    }
+
+    .footer-link {
+        color: var(--accent-primary);
+        text-decoration: none;
+    }
+
+    .footer-link:hover {
+        text-decoration: underline;
+    }
+
+    /* ===== PLOTLY CHARTS ===== */
+    .js-plotly-plot {
+        border-radius: var(--border-radius) !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -802,75 +1210,74 @@ def statistical_significance_analysis(rolling_results):
     }
 
 
-# Main App Header
+# =============================================================================
+# HERO SECTION
+# =============================================================================
 st.markdown("""
-<div style="
-    background: linear-gradient(45deg, #fab1a0, #ffeaa7, #a29bfe);
-    background-size: 300% 300%;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    font-size: 3rem;
-    text-align: center;
-    font-weight: 600;
-    margin-bottom: 2rem;
-    padding: 1rem;
-">
-📈 Optimal Investment Frequency Finder
+<div class="hero-container">
+    <div class="hero-badge">📊 Backtesting Engine</div>
+    <h1 class="hero-title">Investment Frequency Optimizer</h1>
+    <p class="hero-subtitle">
+        Discover if timing matters. Analyze daily, weekly, and monthly DCA strategies
+        with statistical rigor across decades of market data.
+    </p>
 </div>
 """, unsafe_allow_html=True)
 
-st.markdown("""
-<div style='text-align: center; margin-bottom: 2rem; color: #666;'>
-    Find the best investment timing strategy by backtesting across different market conditions and time periods
-</div>
-""", unsafe_allow_html=True)
+# =============================================================================
+# INPUT SECTION
+# =============================================================================
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
-# Input Section
-col1, col2, col3 = st.columns(3)
+# Create a cleaner input layout
+col1, col2, col3 = st.columns([2, 2, 1.5])
 
 with col1:
     ticker = st.text_input(
-        "📊 Stock Ticker",
+        "Stock Ticker",
         value=CONFIG['default_ticker'],
-        help="Enter any stock ticker (VTI, SPY, QQQ, AAPL, etc.)"
-    ).upper()
+        help="Enter any stock ticker symbol (e.g., VTI, SPY, QQQ, AAPL)",
+        placeholder="VTI"
+    ).upper().strip()
 
 with col2:
     monthly_amount = st.number_input(
-        "💰 Monthly Investment ($)",
+        "Monthly Investment",
         min_value=CONFIG['min_investment'],
         max_value=CONFIG['max_investment'],
         value=CONFIG['default_monthly_amount'],
         step=100,
-        help="How much you want to invest each month"
+        format="%d",
+        help="Amount to invest each month in USD"
     )
 
 with col3:
+    st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
     use_max_data = st.checkbox(
-        "📊 Use All Available Data",
+        "Use all available data",
         value=True,
-        help="Use maximum historical data for more robust analysis"
+        help="Analyze maximum historical data for most robust results"
     )
-    
-    if not use_max_data:
-        analysis_years = st.slider(
-            "📅 Analysis Period (Years)",
-            min_value=5,
-            max_value=25,
-            value=15,
-            help="How many years of data to analyze"
-        )
-    else:
-        st.write("**Using maximum available data**")
+
+# Show year slider only if not using max data
+if not use_max_data:
+    analysis_years = st.slider(
+        "Analysis Period (Years)",
+        min_value=5,
+        max_value=25,
+        value=15,
+        help="Number of years of historical data to analyze"
+    )
+
+st.markdown('<div style="height: 1rem"></div>', unsafe_allow_html=True)
 
 # Methodology Section (Educational)
-with st.expander("📚 How This Analysis Works", expanded=False):
+with st.expander("💡 How This Analysis Works", expanded=False):
     st.markdown("""
-    ### Understanding the Methodology
+    ### The Science Behind the Analysis
 
-    This tool helps you determine if **when** you invest (daily, weekly, or monthly) actually
-    matters for your returns. Here's what we do:
+    This tool uses rigorous statistical methods to determine if **when** you invest
+    actually matters for your long-term returns.
 
     ---
 
@@ -945,10 +1352,10 @@ with st.expander("📚 How This Analysis Works", expanded=False):
     """)
 
 # Run Analysis Button
-if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=True):
+if st.button("Analyze Investment Strategies", type="primary", use_container_width=True):
 
     # Download data
-    with st.spinner(f"📡 Downloading data for {ticker}..."):
+    with st.spinner(f"Fetching market data for {ticker}..."):
         if use_max_data:
             result = download_stock_data(ticker)
         else:
@@ -961,15 +1368,29 @@ if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=T
         data_years = result.data_years
 
     if not result.success:
-        st.error(f"❌ {error}")
+        st.markdown(f"""
+        <div class="verdict-box verdict-warning">
+            <div class="verdict-title">⚠️ Unable to Load Data</div>
+            <div class="verdict-text">{error}</div>
+        </div>
+        """, unsafe_allow_html=True)
         st.stop()
 
     if len(data) < CONFIG['min_data_points']:
-        st.error(f"❌ Insufficient data for robust analysis. Found {len(data):,} trading days, need at least {CONFIG['min_data_points']:,}. Try a different ticker or longer time period.")
+        st.markdown(f"""
+        <div class="verdict-box verdict-warning">
+            <div class="verdict-title">⚠️ Insufficient Data</div>
+            <div class="verdict-text">Found {len(data):,} trading days, but need at least {CONFIG['min_data_points']:,} for robust analysis. Try a different ticker or longer time period.</div>
+        </div>
+        """, unsafe_allow_html=True)
         st.stop()
-    
-    st.success(f"✅ Loaded {len(data):,} trading days for {stock_name} ({data_years:.1f} years of data)")
-    st.info(f"📅 Data range: {data.index.min().strftime('%Y-%m-%d')} to {data.index.max().strftime('%Y-%m-%d')}")
+
+    # Show data info in a clean card
+    st.markdown(f"""
+    <div class="info-box">
+        <p>📊 <strong>{stock_name}</strong> &nbsp;|&nbsp; {len(data):,} trading days &nbsp;|&nbsp; {data_years:.1f} years of data &nbsp;|&nbsp; {data.index.min().strftime('%b %Y')} → {data.index.max().strftime('%b %Y')}</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Define strategies to test
     strategies = {
@@ -1000,119 +1421,125 @@ if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=T
     
     # Results Display
     if overall_results:
-        
+
         # Find overall winner
         best_overall = max(overall_results, key=lambda x: x['annualized_return'])
-        
-        # Winner announcement
+        profit = best_overall['final_value'] - best_overall['total_invested']
+
+        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+
+        # Winner Banner - Clean and prominent
         st.markdown(f"""
-        <div class="winner-box">
-            🏆 <strong>OPTIMAL STRATEGY: {best_overall['strategy'].replace('_', ' ').upper()}</strong><br>
-            📈 <strong>{best_overall['annualized_return']:.2f}% Annualized Return</strong> | 
-            💰 <strong>${best_overall['final_value']:,.0f} Final Value</strong>
+        <div class="result-banner">
+            <div class="result-title">Best Performing Strategy</div>
+            <div class="result-value">{best_overall['strategy'].replace('_', ' ').title()}</div>
+            <div class="result-subtitle">{best_overall['annualized_return']:.2f}% annualized return · ${best_overall['final_value']:,.0f} final value</div>
         </div>
         """, unsafe_allow_html=True)
-        
-        # Performance comparison
-        col1, col2 = st.columns([2, 1])
-        
+
+        # Key Metrics Row
+        col1, col2, col3, col4 = st.columns(4)
+
         with col1:
-            st.subheader("📊 Strategy Performance Comparison")
-            
-            # Create comparison chart
-            results_df = pd.DataFrame(overall_results)
-            results_df['Display_Name'] = results_df['strategy'].str.replace('_', ' ').str.title()
-            
-            fig = px.bar(
-                results_df.sort_values('annualized_return', ascending=True),
-                x='annualized_return',
-                y='Display_Name',
-                orientation='h',
-                title=f"Annualized Returns - {stock_name}",
-                labels={'annualized_return': 'Annualized Return (%)', 'Display_Name': 'Strategy'},
-                color='annualized_return',
-                color_continuous_scale='RdYlGn'
-            )
-            fig.update_layout(
-                height=400, 
-                showlegend=False
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            st.subheader("📈 Key Metrics")
-            
-            profit = best_overall['final_value'] - best_overall['total_invested']
-            
             st.metric(
-                label="💰 Final Portfolio Value", 
+                label="Final Value",
                 value=f"${best_overall['final_value']:,.0f}",
-                delta=f"+${profit:,.0f}"
+                delta=f"+${profit:,.0f} profit"
             )
-            
+
+        with col2:
             st.metric(
-                label="📊 Total Invested", 
+                label="Total Invested",
                 value=f"${best_overall['total_invested']:,.0f}",
                 delta=f"{best_overall['years_invested']:.1f} years"
             )
-            
+
+        with col3:
             st.metric(
-                label="📈 Annualized Return", 
+                label="Annualized Return",
                 value=f"{best_overall['annualized_return']:.2f}%",
-                delta=f"Total: {best_overall['total_return']:.1f}%"
+                delta=f"{best_overall['total_return']:.1f}% total"
             )
-            
+
+        with col4:
             st.metric(
-                label="📉 Max Drawdown", 
+                label="Max Drawdown",
                 value=f"{best_overall['max_drawdown']:.1f}%",
-                delta="Risk measure",
+                delta="risk metric",
                 delta_color="off"
             )
         
+        # Strategy Comparison Chart
+        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+        st.markdown("### Strategy Comparison")
+
+        results_df = pd.DataFrame(overall_results)
+        results_df['Display_Name'] = results_df['strategy'].str.replace('_', ' ').str.title()
+
+        fig = px.bar(
+            results_df.sort_values('annualized_return', ascending=True),
+            x='annualized_return',
+            y='Display_Name',
+            orientation='h',
+            labels={'annualized_return': 'Annualized Return (%)', 'Display_Name': ''},
+            color='annualized_return',
+            color_continuous_scale=[[0, '#ef4444'], [0.5, '#f59e0b'], [1, '#10b981']]
+        )
+        fig.update_layout(
+            height=350,
+            showlegend=False,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(family='Inter, sans-serif', color='#94a3b8'),
+            xaxis=dict(gridcolor='#2d2d3a', zerolinecolor='#2d2d3a'),
+            yaxis=dict(gridcolor='#2d2d3a'),
+            coloraxis_showscale=False,
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        fig.update_traces(marker_line_width=0)
+        st.plotly_chart(fig, use_container_width=True)
+
         # Rolling window results
         if rolling_results:
-            st.subheader("🔄 Rolling Window Analysis")
-            st.markdown(f"Comprehensive testing across {len(rolling_results)} different time periods - each capturing unique market conditions")
-            
+            st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+            st.markdown("### Rolling Window Analysis")
+            st.markdown(f"*Testing across {len(rolling_results)} different time periods*")
+
             rolling_df = pd.DataFrame(rolling_results)
-            
+
             window_summary = rolling_df.groupby('window_years').size()
             total_periods = len(rolling_df) // len(strategies)
-            st.write(f"**Windows tested**: {', '.join([f'{int(years)}yr ({count//len(strategies)} periods)' for years, count in window_summary.items()])} = **{total_periods} total market periods**")
-            
+
             # Calculate overall win rates across ALL periods
             win_rates = rolling_df.groupby('strategy')['is_winner'].agg(['sum', 'count'])
             win_rates['win_rate'] = (win_rates['sum'] / win_rates['count'] * 100).round(1)
             win_rates = win_rates.sort_values('win_rate', ascending=False)
-            
+
             # Show average performance across all periods
             avg_performance = rolling_df.groupby('strategy')['annualized_return'].agg(['mean', 'std', 'min', 'max']).round(2)
-            
+
             col1, col2 = st.columns(2)
-            
+
             with col1:
-                st.write("**🏆 Win Rates Across All Periods:**")
+                st.markdown("**Win Rates**")
                 for strategy, row in win_rates.iterrows():
                     strategy_name = strategy.replace('_', ' ').title()
                     avg_return = avg_performance.loc[strategy, 'mean']
-                    st.write(f"• **{strategy_name}**: {row['win_rate']}% wins | Avg: {avg_return:.1f}%")
-            
+                    st.markdown(f"**{strategy_name}** — {row['win_rate']}% wins · {avg_return:.1f}% avg")
+
             with col2:
-                # Simple summary instead of confusing scatter plot
-                st.write("**📊 Performance Summary:**")
-                st.write(f"• **Total periods tested**: {total_periods}")
-                st.write(f"• **Most consistent winner**: {win_rates.index[0].replace('_', ' ').title()}")
-                st.write(f"• **Highest average return**: {avg_performance['mean'].idxmax().replace('_', ' ').title()}")
-                
-                # Show performance range
+                st.markdown("**Summary**")
+                st.markdown(f"**{total_periods}** market periods tested")
+                st.markdown(f"**{win_rates.index[0].replace('_', ' ').title()}** most consistent winner")
                 best_performance = avg_performance.loc[avg_performance['mean'].idxmax()]
                 worst_performance = avg_performance.loc[avg_performance['mean'].idxmin()]
                 performance_spread = best_performance['mean'] - worst_performance['mean']
-                st.write(f"• **Performance spread**: {performance_spread:.2f}% difference between best and worst")
+                st.markdown(f"**{performance_spread:.2f}%** spread between best and worst")
 
             # Statistical Significance Analysis
-            st.subheader("📊 Statistical Significance Analysis")
-            st.markdown("*Does investment frequency actually matter for this ticker, or is it just noise?*")
+            st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+            st.markdown("### Statistical Significance")
+            st.markdown("*Does frequency actually matter, or is it just noise?*")
 
             sig_analysis = statistical_significance_analysis(rolling_results)
 
@@ -1178,37 +1605,32 @@ if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=T
                 st.markdown("• *10:1 to 30:1*: Strong evidence")
                 st.markdown("• *>30:1*: Very strong evidence")
 
-            # Verdict box
+            # Verdict box with new styling
             if sig_analysis['verdict'] == 'no_significant_difference':
-                verdict_color = "#e8f5e9"  # Light green
+                verdict_class = "verdict-success"
                 verdict_icon = "✅"
             elif sig_analysis['verdict'] == 'clear_winner':
-                verdict_color = "#fff3e0"  # Light orange
+                verdict_class = "verdict-warning"
                 verdict_icon = "🏆"
             else:
-                verdict_color = "#e3f2fd"  # Light blue
+                verdict_class = "verdict-info"
                 verdict_icon = "📊"
 
             st.markdown(f"""
-            <div style="
-                background: {verdict_color};
-                padding: 1rem;
-                border-radius: 10px;
-                margin: 1rem 0;
-                border-left: 4px solid {'#4caf50' if sig_analysis['verdict'] == 'no_significant_difference' else '#ff9800'};
-            ">
-                <strong>{verdict_icon} STATISTICAL VERDICT:</strong><br>
-                {sig_analysis['verdict_text']}
+            <div class="verdict-box {verdict_class}">
+                <div class="verdict-title">{verdict_icon} Statistical Verdict</div>
+                <div class="verdict-text">{sig_analysis['verdict_text']}</div>
             </div>
             """, unsafe_allow_html=True)
 
         # Market condition results
         if regime_results:
-            st.subheader("📊 Market Condition Analysis") 
-            st.markdown("Performance across naturally occurring market conditions (based on volatility and returns)")
-            
+            st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+            st.markdown("### Market Condition Analysis")
+            st.markdown("*Performance across different market regimes*")
+
             regime_df = pd.DataFrame(regime_results)
-            
+
             # Create regime performance heatmap
             regime_pivot = regime_df.pivot_table(
                 values='annualized_return',
@@ -1216,22 +1638,25 @@ if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=T
                 columns='regime',
                 aggfunc='mean'
             ).fillna(0)
-            
+
             # Clean up strategy names for display
             regime_pivot.index = regime_pivot.index.str.replace('_', ' ').str.title()
-            
+
             fig = px.imshow(
                 regime_pivot,
                 aspect='auto',
-                title="Strategy Performance by Market Condition (%)",
-                color_continuous_scale='RdYlGn',
-                labels={'color': 'Annualized Return (%)'},
-                text_auto='.1f'  # Show values on the heatmap
+                color_continuous_scale=[[0, '#ef4444'], [0.5, '#1a1a24'], [1, '#10b981']],
+                labels={'color': 'Return (%)'},
+                text_auto='.1f'
             )
             fig.update_layout(
                 height=400,
-                xaxis_title="Market Condition",
-                yaxis_title="Investment Strategy"
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(family='Inter, sans-serif', color='#94a3b8'),
+                xaxis=dict(title='', tickfont=dict(size=11)),
+                yaxis=dict(title='', tickfont=dict(size=11)),
+                margin=dict(l=20, r=20, t=20, b=20)
             )
             st.plotly_chart(fig, use_container_width=True)
             
@@ -1449,10 +1874,13 @@ if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=T
                 st.info("ℹ️ Confidence based on overall performance across full time period")
 
 # Footer
-st.markdown("---")
 st.markdown("""
-<div style='text-align: center; color: #666; margin-top: 2rem;'>
-    <p>📊 <strong>Investment Frequency Optimizer</strong> | Backtest investment strategies across market cycles</p>
-    <p><em>Disclaimer: Past performance does not guarantee future results. This is for educational purposes only.</em></p>
+<div class="app-footer">
+    <p style="margin-bottom: 0.5rem; color: #64748b;">
+        <strong style="color: #94a3b8;">Investment Frequency Optimizer</strong> · Statistical backtesting for DCA strategies
+    </p>
+    <p style="font-size: 0.8rem; color: #475569; margin: 0;">
+        Past performance does not guarantee future results. For educational purposes only.
+    </p>
 </div>
 """, unsafe_allow_html=True)
