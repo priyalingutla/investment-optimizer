@@ -5,8 +5,10 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
+from scipy import stats
 import warnings
 import re
+import time
 warnings.filterwarnings('ignore')
 
 # =============================================================================
@@ -52,6 +54,11 @@ CONFIG = {
     'effect_size_small': 0.2,            # Cohen's d threshold for small effect
     'effect_size_medium': 0.5,           # Cohen's d threshold for medium effect
     'effect_size_large': 0.8,            # Cohen's d threshold for large effect
+
+    # Rate limit / retry settings
+    'max_retries': 3,                    # Max retry attempts for API calls
+    'initial_retry_delay': 2,            # Initial delay in seconds
+    'retry_backoff_factor': 2,           # Multiply delay by this each retry
 }
 
 # Set page config with light theme
@@ -133,6 +140,44 @@ def validate_ticker(symbol):
 
     return True, symbol
 
+def _fetch_with_retry(ticker, max_years=None):
+    """
+    Fetch data from Yahoo Finance with exponential backoff retry logic.
+
+    Handles rate limiting (HTTP 429) by waiting and retrying.
+    """
+    max_retries = CONFIG['max_retries']
+    delay = CONFIG['initial_retry_delay']
+    backoff = CONFIG['retry_backoff_factor']
+
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            if max_years:
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=max_years * 365)
+                data = ticker.history(start=start_date, end=end_date, actions=True, period="max")
+            else:
+                data = ticker.history(actions=True, period="max")
+            return data, None
+        except Exception as e:
+            last_error = e
+            error_msg = str(e).lower()
+
+            # Check if it's a rate limit error
+            if 'rate' in error_msg or '429' in error_msg or 'too many' in error_msg:
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                    delay *= backoff
+                    continue
+            else:
+                # Non-rate-limit error, don't retry
+                break
+
+    return None, last_error
+
+
 @st.cache_data(ttl=CONFIG['cache_ttl_seconds'])
 def download_stock_data(symbol, max_years=None):
     """
@@ -151,13 +196,18 @@ def download_stock_data(symbol, max_years=None):
     try:
         ticker = yf.Ticker(symbol)
 
-        # Get historical data
-        if max_years:
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=max_years * 365)
-            data = ticker.history(start=start_date, end=end_date, actions=True, period="max")
-        else:
-            data = ticker.history(actions=True, period="max")
+        # Get historical data with retry logic for rate limits
+        data, fetch_error = _fetch_with_retry(ticker, max_years)
+
+        if fetch_error:
+            error_msg = str(fetch_error).lower()
+            if 'rate' in error_msg or '429' in error_msg or 'too many' in error_msg:
+                return StockDataResult(
+                    error="Yahoo Finance rate limit reached. Please wait a moment and try again.",
+                    stock_name=symbol
+                )
+            # Re-raise non-rate-limit errors to be caught by outer exception handler
+            raise fetch_error
 
         if data is None or len(data) == 0:
             return StockDataResult(
@@ -294,15 +344,24 @@ def perform_investment_qa(data, investment_dates, frequency, specific_day=None):
     return qa_results
 
 def calculate_strategy_performance(data, frequency='daily', specific_day=None, monthly_budget=4000):
-    """Calculate investment returns with robust date handling - FIXED MONTHLY CALCULATION"""
-    
+    """
+    Calculate investment returns with NORMALIZED total investment amounts.
+
+    IMPORTANT: All strategies invest the SAME TOTAL AMOUNT over the period.
+    We calculate investment_amount dynamically based on actual trading days
+    to ensure fair comparison.
+    """
+
     if len(data) == 0:
         return None
-    
-    # Get investment dates and amounts based on frequency
+
+    # First, determine how many months of data we have
+    data_months = (data.index.max() - data.index.min()).days / 30.44
+    target_total_investment = monthly_budget * data_months
+
+    # Get investment dates based on frequency
     if frequency == 'daily':
         investment_dates = data.index
-        investment_amount = monthly_budget / CONFIG['trading_days_per_month']
     elif frequency == 'weekly':
         if specific_day:
             weekday_data = data[data['Weekday'] == specific_day]
@@ -310,24 +369,21 @@ def calculate_strategy_performance(data, frequency='daily', specific_day=None, m
         else:
             weekly_groups = data.groupby(data.index.to_period('W'))
             investment_dates = weekly_groups.first().index
-        investment_amount = monthly_budget / CONFIG['weeks_per_month']
     elif frequency == 'monthly':
-        # FIXED: Use a more robust monthly date generation method
-        # Group by year-month and take the first trading day of each month
         monthly_groups = data.groupby([data.index.year, data.index.month])
         investment_dates = monthly_groups.first().index
-        
-        # CRITICAL FIX: Make sure we use the correct investment amount
-        investment_amount = monthly_budget  # This should be the full monthly budget!
     else:
         return None
-    
-    # Perform QA checks silently - only fail if critical issues found
-    qa_checks = perform_investment_qa(data, investment_dates, frequency, specific_day)
-    
-    # Only fail if we have no investment dates or critical data issues
+
     if len(investment_dates) == 0:
         return None
+
+    # CRITICAL: Calculate investment amount to ensure ALL strategies invest
+    # the same total amount. This ensures fair comparison.
+    investment_amount = target_total_investment / len(investment_dates)
+
+    # Perform QA checks silently - only fail if critical issues found
+    qa_checks = perform_investment_qa(data, investment_dates, frequency, specific_day)
     
     # Track investment performance
     total_shares = 0
@@ -572,6 +628,77 @@ def calculate_cohens_d(group1, group2):
     return (np.mean(group1) - np.mean(group2)) / pooled_std
 
 
+def calculate_bayes_factor(group1, group2):
+    """
+    Calculate approximate Bayes Factor for comparing two strategy returns.
+
+    Uses the BIC approximation method (Wagenmakers, 2007) to compute
+    the Bayes Factor from a t-test, which is more interpretable than p-values.
+
+    Interpretation (Jeffreys' scale):
+        BF < 1:     Evidence favors null (no difference)
+        1-3:        Anecdotal evidence for difference
+        3-10:       Moderate evidence for difference
+        10-30:      Strong evidence for difference
+        30-100:     Very strong evidence
+        >100:       Extreme evidence
+
+    Returns:
+        tuple: (bayes_factor, evidence_category, interpretation)
+    """
+    n1, n2 = len(group1), len(group2)
+    n = n1 + n2
+
+    # Perform t-test to get t-statistic
+    t_stat, p_value = stats.ttest_ind(group1, group2)
+
+    # BIC approximation for Bayes Factor (Wagenmakers 2007)
+    # BF10 ≈ sqrt(n) * exp(-0.5 * BIC_diff)
+    # where BIC_diff ≈ t^2 - log(n)
+
+    # Calculate approximate log Bayes Factor
+    log_bf = 0.5 * (np.log(n) - t_stat**2 * n / (n - 2))
+
+    # Convert to Bayes Factor (BF10: evidence for alternative over null)
+    bf = np.exp(-log_bf)
+
+    # Interpret using Jeffreys' scale
+    if bf < 1:
+        if bf < 1/100:
+            category = "extreme_null"
+            interpretation = "Extreme evidence for NO difference"
+        elif bf < 1/30:
+            category = "very_strong_null"
+            interpretation = "Very strong evidence for NO difference"
+        elif bf < 1/10:
+            category = "strong_null"
+            interpretation = "Strong evidence for NO difference"
+        elif bf < 1/3:
+            category = "moderate_null"
+            interpretation = "Moderate evidence for NO difference"
+        else:
+            category = "anecdotal_null"
+            interpretation = "Anecdotal evidence (inconclusive)"
+    else:
+        if bf > 100:
+            category = "extreme_alt"
+            interpretation = "Extreme evidence for difference"
+        elif bf > 30:
+            category = "very_strong_alt"
+            interpretation = "Very strong evidence for difference"
+        elif bf > 10:
+            category = "strong_alt"
+            interpretation = "Strong evidence for difference"
+        elif bf > 3:
+            category = "moderate_alt"
+            interpretation = "Moderate evidence for difference"
+        else:
+            category = "anecdotal_alt"
+            interpretation = "Anecdotal evidence (inconclusive)"
+
+    return bf, category, interpretation
+
+
 def interpret_effect_size(d):
     """Interpret Cohen's d effect size."""
     d_abs = abs(d)
@@ -625,14 +752,28 @@ def statistical_significance_analysis(rolling_results):
         cohens_d = calculate_cohens_d(best_returns, strategy_returns)
         effect_interpretation = interpret_effect_size(cohens_d)
 
-        # Determine significance
-        is_significant = not ci_overlap and effect_interpretation in ['medium', 'large']
+        # Calculate Bayes Factor for more nuanced evidence assessment
+        bayes_factor, bf_category, bf_interpretation = calculate_bayes_factor(best_returns, strategy_returns)
+
+        # Determine significance using BOTH frequentist and Bayesian criteria
+        # Frequentist: non-overlapping CIs + medium/large effect
+        frequentist_sig = not ci_overlap and effect_interpretation in ['medium', 'large']
+        # Bayesian: moderate or stronger evidence for difference (BF > 3)
+        bayesian_sig = bayes_factor > 3
+
+        # Combined verdict: significant if EITHER method shows it
+        is_significant = frequentist_sig or bayesian_sig
 
         pairwise_results[strategy] = {
             'mean_diff': best_mean - bootstrap_cis[strategy]['mean'],
             'ci_overlap': ci_overlap,
             'cohens_d': cohens_d,
             'effect_size': effect_interpretation,
+            'bayes_factor': bayes_factor,
+            'bf_category': bf_category,
+            'bf_interpretation': bf_interpretation,
+            'frequentist_sig': frequentist_sig,
+            'bayesian_sig': bayesian_sig,
             'is_significant': is_significant
         }
 
@@ -756,32 +897,35 @@ with st.expander("📚 How This Analysis Works", expanded=False):
 
     ---
 
-    #### 3️⃣ **Statistical Significance Testing**
+    #### 3️⃣ **Statistical Evidence Testing**
 
     Just because one strategy has a higher average return doesn't mean it's actually better.
-    The difference could be random noise. We use two statistical methods:
+    The difference could be random noise. We use **three complementary methods**:
 
-    **Bootstrap Confidence Intervals**
+    **Bootstrap Confidence Intervals** (Frequentist)
     - We resample our results 1,000 times to estimate the true range of each strategy's returns
     - If the confidence intervals overlap, the strategies are statistically similar
-    - Think of it as: "If we ran this experiment 1,000 times, what range of results would we see?"
 
-    **Cohen's d Effect Size**
+    **Cohen's d Effect Size** (Practical Significance)
     - Even if there's a statistical difference, is it *practically* meaningful?
     - Effect sizes: Negligible (<0.2) → Small (0.2-0.5) → Medium (0.5-0.8) → Large (>0.8)
-    - A "small" effect might be statistically significant but not worth changing your behavior
+
+    **Bayes Factor** (Bayesian Evidence)
+    - Instead of just "significant or not", Bayes Factors tell you *how strong* the evidence is
+    - Uses Jeffreys' scale: Anecdotal (1-3) → Moderate (3-10) → Strong (10-30) → Very Strong (30-100)
+    - *Example: BF=15 means "the data are 15× more likely under the hypothesis that strategies differ"*
 
     ---
 
     #### 4️⃣ **The Verdict**
 
-    We combine statistical significance with effect size to give you a clear answer:
+    We combine all three methods to give you a nuanced answer:
 
     | Result | What It Means |
     |--------|---------------|
-    | **No Significant Difference** | Pick whichever frequency is most convenient for you |
-    | **Clear Winner** | One strategy is reliably better - use it |
-    | **Partial Significance** | Some differences exist, but the best choice depends on your preferences |
+    | **No Evidence of Difference** | Pick whichever frequency is most convenient for you |
+    | **Moderate/Strong Evidence** | One strategy may be better - consider using it |
+    | **Clear Winner** | Strong statistical evidence for one strategy |
 
     ---
 
@@ -796,8 +940,8 @@ with st.expander("📚 How This Analysis Works", expanded=False):
     **Confidence Interval**: A range where the true value likely falls.
     *Example: 8.2% [7.4% - 9.1%] means we're 95% confident the true return is in that range*
 
-    **Statistical Significance**: The probability that an observed difference is real, not random chance.
-    *We use p < 0.05, meaning less than 5% chance the difference is due to luck*
+    **Bayes Factor (BF)**: How much more likely the data are under one hypothesis vs another.
+    *Example: BF=10 means "10× more likely that strategies differ than that they're the same"*
     """)
 
 # Run Analysis Button
@@ -994,26 +1138,45 @@ if st.button("🚀 Find Optimal Strategy", type="primary", use_container_width=T
             best_strat_name = sig_analysis['best_strategy'].replace('_', ' ').title()
             st.markdown(f"**Comparing other strategies to {best_strat_name}:**")
 
+            # Create comparison table with Bayesian evidence
+            comparison_data = []
+            for strategy, comparison in sig_analysis['pairwise'].items():
+                bf = comparison['bayes_factor']
+                # Format Bayes Factor nicely
+                if bf < 0.01:
+                    bf_str = f"1:{1/bf:.0f}"
+                elif bf < 1:
+                    bf_str = f"1:{1/bf:.1f}"
+                elif bf > 100:
+                    bf_str = f"{bf:.0f}:1"
+                else:
+                    bf_str = f"{bf:.1f}:1"
+
+                comparison_data.append({
+                    'Strategy': strategy.replace('_', ' ').title(),
+                    'Return Diff': f"{comparison['mean_diff']:+.2f}%",
+                    'Effect Size': comparison['effect_size'].title(),
+                    'Bayes Factor': bf_str,
+                    'Evidence': comparison['bf_interpretation'].replace('evidence', '').strip().title()
+                })
+
+            comparison_df = pd.DataFrame(comparison_data)
+            st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+
             col1, col2 = st.columns(2)
             with col1:
-                for strategy, comparison in sig_analysis['pairwise'].items():
-                    strategy_name = strategy.replace('_', ' ').title()
-                    diff = comparison['mean_diff']
-                    effect = comparison['effect_size']
-                    overlap = "overlap" if comparison['ci_overlap'] else "no overlap"
-
-                    if comparison['is_significant']:
-                        st.markdown(f"• **{strategy_name}**: {diff:+.2f}% diff, **{effect}** effect ⚠️")
-                    else:
-                        st.markdown(f"• **{strategy_name}**: {diff:+.2f}% diff, {effect} effect")
-
-            with col2:
-                # Effect size legend
                 st.markdown("**Effect Size Guide:**")
                 st.markdown("• *Negligible* (<0.2): No practical difference")
                 st.markdown("• *Small* (0.2-0.5): Minor difference")
                 st.markdown("• *Medium* (0.5-0.8): Meaningful difference")
                 st.markdown("• *Large* (>0.8): Major difference")
+
+            with col2:
+                st.markdown("**Bayes Factor Guide:**")
+                st.markdown("• *1:3 to 3:1*: Inconclusive (anecdotal)")
+                st.markdown("• *3:1 to 10:1*: Moderate evidence")
+                st.markdown("• *10:1 to 30:1*: Strong evidence")
+                st.markdown("• *>30:1*: Very strong evidence")
 
             # Verdict box
             if sig_analysis['verdict'] == 'no_significant_difference':
